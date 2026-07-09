@@ -4,11 +4,14 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import statsRoutes from './routes/statsRoutes';
 import userRoutes from './routes/userRoutes';
+import challengeRoutes from './routes/challengeRoutes';
+import tokenRoutes from './routes/tokenRoutes';
+import screenTimeRoutes from './routes/screenTimeRoutes';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(cors());
@@ -28,11 +31,14 @@ mongoose
 
 app.use('/api/stats', statsRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/challenge', challengeRoutes);
+app.use('/api', tokenRoutes);
+app.use('/api/screentime', screenTimeRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('IRONMIND TypeScript API with MongoDB is running...');
 });
 
-app.listen(PORT, () => {
+app.listen(PORT,'0.0.0.0', () => {
   console.log(`⚡️ [server]: Server is sprinting on port ${PORT}`);
 });

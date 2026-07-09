@@ -23,7 +23,7 @@ router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
 
 router.post('/', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, level, currentXP, currentStreak, totalReps, bestReactionTime } = req.body;
+    const { userId, currentStreak, longestStreak, bestReactionTime, totalChallenges, successCount, currentXP, level } = req.body;
 
     if (!userId) {
       return res.status(400).json({ message: 'userId is required' });
@@ -31,18 +31,11 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
 
     const updatedStats = await UserStats.findOneAndUpdate(
       { userId },
-      {
-        level,
-        currentXP,
-        currentStreak,
-        totalReps,
-        bestReactionTime,
-        updatedAt: new Date()
-      },
+      { currentStreak, longestStreak, bestReactionTime, totalChallenges, successCount, currentXP, level, updatedAt: new Date() },
       { new: true, upsert: true }
     );
 
-    console.log(`🎯 [API]: Stats successfully updated in Cloud for user: ${userId}`);
+    console.log(`🎯 [API]: Stats updated for user: ${userId} | streak: ${currentStreak} | longest: ${longestStreak}`);
 
     return res.status(200).json(updatedStats);
   } catch (error) {

@@ -5,21 +5,24 @@ const router = Router();
 
 router.post('/onboarding', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, targetApps, goals, difficultyLevel } = req.body;
+    const { uid, email, displayName, photoURL, targetApps, goals, difficultyLevel } = req.body;
 
     if (!targetApps || !goals || !difficultyLevel) {
       return res.status(400).json({ message: 'targetApps, goals, and difficultyLevel are required' });
     }
 
-    const filter = userId ? { userId } : { userId: 'anonymous' };
+    let onboarding;
+    if (uid) {
+      onboarding = await UserOnboarding.findOneAndUpdate(
+        { uid },
+        { $set: { uid, email, displayName, photoURL, targetApps, goals, difficultyLevel } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+    } else {
+      onboarding = await UserOnboarding.create({ targetApps, goals, difficultyLevel });
+    }
 
-    const onboarding = await UserOnboarding.findOneAndUpdate(
-      filter,
-      { targetApps, goals, difficultyLevel },
-      { new: true, upsert: true }
-    );
-
-    console.log(`🧠 [API]: Onboarding saved for user: ${userId ?? 'anonymous'}`);
+    console.log(`🧠 [API]: Onboarding saved for user: ${uid ?? 'anonymous'}`);
 
     return res.status(200).json(onboarding);
   } catch (error) {

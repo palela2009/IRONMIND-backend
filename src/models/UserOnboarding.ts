@@ -1,7 +1,11 @@
 import { Schema, model, Document } from 'mongoose';
 
 export interface IUserOnboarding extends Document {
-  userId: string;
+  uid?: string;
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
+  pushToken?: string | null;
   targetApps: string[];
   goals: string[];
   difficultyLevel: string;
@@ -9,10 +13,14 @@ export interface IUserOnboarding extends Document {
 }
 
 const userOnboardingSchema = new Schema<IUserOnboarding>({
-  userId: { type: String, required: true, unique: true },
+  uid: { type: String, unique: true, sparse: true },
+  email: { type: String },
+  displayName: { type: String },
+  photoURL: { type: String },
+  pushToken: { type: String, default: null },
   targetApps: { type: [String], default: [] },
   goals: { type: [String], default: [] },
-  difficultyLevel: { type: String, default: 'EASY' },
+  difficultyLevel: { type: String, enum: ['EASY', 'INTERMEDIATE', 'HARD'], default: 'EASY' },
   createdAt: { type: Date, default: Date.now }
 });
 
