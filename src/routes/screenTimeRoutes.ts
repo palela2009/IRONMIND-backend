@@ -3,8 +3,6 @@ import { ScreenTime } from '../models/ScreenTime';
 
 const router = Router();
 
-// POST /api/screentime
-// Body: { userId, date, apps: [{ app, minutes }] }
 router.post('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const { userId, date, apps } = req.body;
@@ -13,7 +11,6 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'userId, date, and apps[] are required' });
     }
 
-    // Validate date format YYYY-MM-DD
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ message: 'date must be in YYYY-MM-DD format' });
     }
@@ -33,7 +30,6 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// GET /api/screentime/:userId?date=YYYY-MM-DD
 router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
   try {
     const { userId } = req.params;

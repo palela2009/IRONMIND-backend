@@ -46,9 +46,6 @@ export async function sendChallengeNotification(
 
     console.log(`🔔 [Push]: Ticket accepted for user ${userId}, receiptId: ${ticket.id}`);
 
-    // A successful ticket only means Expo accepted the request — the actual FCM/APNs
-    // delivery result only shows up in the receipt a few seconds later. Missing FCM
-    // credentials in EAS (eas credentials) surface here, not on the initial ticket.
     if (ticket.id) {
       setTimeout(() => checkReceipt(ticket.id!, userId), 15_000);
     }
