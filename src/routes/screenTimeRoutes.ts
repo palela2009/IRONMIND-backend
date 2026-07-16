@@ -5,10 +5,11 @@ const router = Router();
 
 router.post('/', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, date, apps } = req.body;
+    const userId = req.uid;
+    const { date, apps } = req.body;
 
-    if (!userId || !date || !Array.isArray(apps)) {
-      return res.status(400).json({ message: 'userId, date, and apps[] are required' });
+    if (!date || !Array.isArray(apps)) {
+      return res.status(400).json({ message: 'date and apps[] are required' });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -34,6 +35,10 @@ router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
   try {
     const { userId } = req.params;
     const { date } = req.query;
+
+    if (userId !== req.uid) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
 
     if (!date || typeof date !== 'string') {
       return res.status(400).json({ message: 'date query param is required (YYYY-MM-DD)' });

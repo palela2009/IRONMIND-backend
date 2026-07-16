@@ -6,11 +6,8 @@ const router = Router();
 
 router.post('/notify', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, targetApp, test } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ message: 'userId is required' });
-    }
+    const userId = req.uid;
+    const { targetApp, test } = req.body;
 
     await sendChallengeNotification(userId, targetApp, !!test);
 
@@ -23,10 +20,11 @@ router.post('/notify', async (req: Request, res: Response): Promise<any> => {
 
 router.post('/result', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, targetApp, elapsedTime, wasSuccessful, timestamp } = req.body;
+    const userId = req.uid;
+    const { targetApp, elapsedTime, wasSuccessful, timestamp } = req.body;
 
-    if (!userId || !targetApp || elapsedTime == null || wasSuccessful == null || !timestamp) {
-      return res.status(400).json({ message: 'userId, targetApp, elapsedTime, wasSuccessful, and timestamp are required' });
+    if (!targetApp || elapsedTime == null || wasSuccessful == null || !timestamp) {
+      return res.status(400).json({ message: 'targetApp, elapsedTime, wasSuccessful, and timestamp are required' });
     }
 
     const result = await ChallengeResult.create({ userId, targetApp, elapsedTime, wasSuccessful, timestamp });

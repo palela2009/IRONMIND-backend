@@ -6,6 +6,11 @@ const router = Router();
 router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
   try {
     const { userId } = req.params;
+
+    if (userId !== req.uid) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
     let stats = await UserStats.findOne({ userId });
 
     if (!stats) {
@@ -23,11 +28,8 @@ router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
 
 router.post('/', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, currentStreak, longestStreak, bestReactionTime, totalChallenges, successCount, currentXP, level } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ message: 'userId is required' });
-    }
+    const userId = req.uid;
+    const { currentStreak, longestStreak, bestReactionTime, totalChallenges, successCount, currentXP, level } = req.body;
 
     const updatedStats = await UserStats.findOneAndUpdate(
       { userId },

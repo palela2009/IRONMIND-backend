@@ -7,6 +7,7 @@ import userRoutes from './routes/userRoutes';
 import challengeRoutes from './routes/challengeRoutes';
 import tokenRoutes from './routes/tokenRoutes';
 import screenTimeRoutes from './routes/screenTimeRoutes';
+import { verifyAuth } from './middleware/verifyAuth';
 
 dotenv.config();
 
@@ -29,11 +30,11 @@ mongoose
   .catch((err) => console.error('❌ [database] Connection error:', err));
 
 
-app.use('/api/stats', statsRoutes);
-app.use('/api/user', userRoutes);
-app.use('/api/challenge', challengeRoutes);
-app.use('/api', tokenRoutes);
-app.use('/api/screentime', screenTimeRoutes);
+app.use('/api/stats', verifyAuth, statsRoutes);
+app.use('/api/user', verifyAuth, userRoutes);
+app.use('/api/challenge', verifyAuth, challengeRoutes);
+app.use('/api', verifyAuth, tokenRoutes);
+app.use('/api/screentime', verifyAuth, screenTimeRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('IRONMIND TypeScript API with MongoDB is running...');

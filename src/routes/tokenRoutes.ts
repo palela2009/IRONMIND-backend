@@ -5,10 +5,11 @@ const router = Router();
 
 router.post('/save-token', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { userId, pushToken } = req.body;
+    const userId = req.uid;
+    const { pushToken } = req.body;
 
-    if (!userId || !pushToken) {
-      return res.status(400).json({ message: 'userId and pushToken are required' });
+    if (!pushToken) {
+      return res.status(400).json({ message: 'pushToken is required' });
     }
 
     await UserOnboarding.findOneAndUpdate(
