@@ -6,7 +6,7 @@ const router = Router();
 router.post('/onboarding', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
-    const { email, displayName, photoURL, targetApps, goals, difficultyLevel } = req.body;
+    const { email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit } = req.body;
 
     if (!targetApps || !goals || !difficultyLevel) {
       return res.status(400).json({ message: 'targetApps, goals, and difficultyLevel are required' });
@@ -14,7 +14,7 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
 
     const onboarding = await UserOnboarding.findOneAndUpdate(
       { uid },
-      { $set: { uid, email, displayName, photoURL, targetApps, goals, difficultyLevel } },
+      { $set: { uid, email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit } },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
