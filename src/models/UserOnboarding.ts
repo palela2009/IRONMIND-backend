@@ -10,6 +10,7 @@ export interface IUserOnboarding extends Document {
   goals: string[];
   difficultyLevel: string;
   dailyChallengeLimit: number;
+  inviteCode?: string;
   createdAt: Date;
 }
 
@@ -23,6 +24,7 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   goals: { type: [String], default: [] },
   difficultyLevel: { type: String, enum: ['EASY', 'INTERMEDIATE', 'HARD'], default: 'EASY' },
   dailyChallengeLimit: { type: Number, default: 5 },
+  inviteCode: { type: String, unique: true, sparse: true },
   createdAt: { type: Date, default: Date.now }
 });
 
