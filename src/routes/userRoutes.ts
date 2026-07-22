@@ -1,5 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
+import { UserStats } from '../models/UserStats';
+import { ChallengeResult } from '../models/ChallengeResult';
+import { ScreenTime } from '../models/ScreenTime';
+import { FriendRequest } from '../models/FriendRequest';
+import admin from '../config/firebaseAdmin';
 
 const router = Router();
 
@@ -60,6 +65,35 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
   } catch (error) {
     console.error('Error saving onboarding:', error);
     return res.status(500).json({ message: 'Server error while saving onboarding' });
+  }
+});
+
+// DELETE /api/user/account — permanently deletes all data for this account, including
+// the Firebase Auth user itself. Irreversible; there is no soft-delete or recovery.
+router.delete('/account', async (req: Request, res: Response): Promise<any> => {
+  const uid = req.uid;
+  try {
+    await Promise.all([
+      UserOnboarding.deleteOne({ uid }),
+      UserStats.deleteOne({ userId: uid }),
+      ChallengeResult.deleteMany({ userId: uid }),
+      ScreenTime.deleteMany({ userId: uid }),
+      FriendRequest.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
+    ]);
+
+    try {
+      await admin.auth().deleteUser(uid);
+    } catch (authError) {
+      // Data is already gone at this point — log but don't fail the request over an
+      // auth-record cleanup issue (e.g. already deleted, or a transient Admin SDK error).
+      console.error(`Error deleting Firebase Auth user ${uid}:`, authError);
+    }
+
+    console.log(`🗑️ [API]: Account deleted for user: ${uid}`);
+    return res.status(200).json({ message: 'Account deleted' });
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    return res.status(500).json({ message: 'Server error while deleting account' });
   }
 });
 
