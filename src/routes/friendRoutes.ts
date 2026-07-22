@@ -16,6 +16,13 @@ function generateCode(length = 6): string {
   return code;
 }
 
+// Falls back to email when displayName was never set (e.g. email/password accounts,
+// or a profile synced before displayName started being sent) — "Unknown" only when
+// neither is available at all.
+function nameFor(profile?: { displayName?: string; email?: string } | null): string {
+  return profile?.displayName || profile?.email || 'Unknown';
+}
+
 // GET /api/friends/code — get or create my invite code
 router.get('/code', async (req: Request, res: Response): Promise<any> => {
   try {
@@ -98,7 +105,7 @@ router.get('/requests', async (req: Request, res: Response): Promise<any> => {
     const result = requests.map((r) => ({
       id: r._id,
       fromUid: r.fromUid,
-      displayName: senderMap.get(r.fromUid)?.displayName ?? 'Unknown',
+      displayName: nameFor(senderMap.get(r.fromUid)),
       photoURL: senderMap.get(r.fromUid)?.photoURL ?? null,
       createdAt: r.createdAt,
     }));
@@ -163,7 +170,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     const result = friendUids
       .map((fuid) => ({
         uid: fuid,
-        displayName: profileMap.get(fuid)?.displayName ?? 'Unknown',
+        displayName: nameFor(profileMap.get(fuid)),
         photoURL: profileMap.get(fuid)?.photoURL ?? null,
         currentStreak: statsMap.get(fuid)?.currentStreak ?? 0,
         longestStreak: statsMap.get(fuid)?.longestStreak ?? 0,

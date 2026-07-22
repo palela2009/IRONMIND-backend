@@ -30,13 +30,27 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
     const uid = req.uid;
     const { email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit } = req.body;
 
-    if (!targetApps || !goals || !difficultyLevel) {
+    const existing = await UserOnboarding.findOne({ uid });
+
+    // A brand new account must go through real onboarding — but an existing account can
+    // send just identity fields (e.g. an automatic post-login resync) without resending
+    // its full settings, so that never overwrites targetApps/goals with nothing.
+    if (!existing && (!targetApps || !goals || !difficultyLevel)) {
       return res.status(400).json({ message: 'targetApps, goals, and difficultyLevel are required' });
     }
 
+    const setFields: Record<string, unknown> = { uid };
+    if (email !== undefined) setFields.email = email;
+    if (displayName !== undefined) setFields.displayName = displayName;
+    if (photoURL !== undefined) setFields.photoURL = photoURL;
+    if (targetApps !== undefined) setFields.targetApps = targetApps;
+    if (goals !== undefined) setFields.goals = goals;
+    if (difficultyLevel !== undefined) setFields.difficultyLevel = difficultyLevel;
+    if (dailyChallengeLimit !== undefined) setFields.dailyChallengeLimit = dailyChallengeLimit;
+
     const onboarding = await UserOnboarding.findOneAndUpdate(
       { uid },
-      { $set: { uid, email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit } },
+      { $set: setFields },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
