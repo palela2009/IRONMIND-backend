@@ -50,11 +50,25 @@ app.listen(PORT,'0.0.0.0', () => {
   console.log(`⚡️ [server]: Server is sprinting on port ${PORT}`);
 
   // Render's free tier spins the service down after ~15 min of no inbound traffic.
-  // Self-pinging well under that threshold keeps it warm so requests never hit a cold start.
+  // Self-pinging well under that threshold keeps it warm so requests never hit a cold
+  // start. Note this can only keep an already-running service awake — it cannot wake one
+  // that has already spun down (nothing is running to fire the timer), so an external
+  // uptime pinger is still the only way to guarantee it never sleeps.
   const selfUrl = process.env.RENDER_EXTERNAL_URL || 'https://ironmind-backend-l3o8.onrender.com';
-  setInterval(() => {
-    fetch(`${selfUrl}/health`)
-      .then((res) => console.log(`💓 [keep-alive]: ping ${res.status}`))
-      .catch((err) => console.error('💓 [keep-alive]: ping failed:', err.message));
-  }, 5 * 60 * 1000);
+
+  const ping = async (attempt = 1): Promise<void> => {
+    try {
+      const res = await fetch(`${selfUrl}/health`);
+      console.log(`💓 [keep-alive]: ping ${res.status}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`💓 [keep-alive]: ping failed (attempt ${attempt}):`, message);
+      // Retry once shortly after rather than leaving a full interval of silence, which
+      // could otherwise let the idle timer run out after a single transient failure.
+      if (attempt < 3) setTimeout(() => ping(attempt + 1), 30_000);
+    }
+  };
+
+  setTimeout(() => ping(), 20_000);
+  setInterval(() => ping(), 4 * 60 * 1000);
 });
