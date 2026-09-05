@@ -175,6 +175,9 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         currentStreak: statsMap.get(fuid)?.currentStreak ?? 0,
         longestStreak: statsMap.get(fuid)?.longestStreak ?? 0,
         totalChallenges: statsMap.get(fuid)?.totalChallenges ?? 0,
+        // Drives the friend's Iron Rank badge on the leaderboard. Defaults to 1 rather
+        // than 0 so a friend with no stats row yet still resolves to a real rank.
+        level: statsMap.get(fuid)?.level ?? 1,
       }))
       .sort((a, b) => b.currentStreak - a.currentStreak);
 
