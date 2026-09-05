@@ -8,6 +8,7 @@ import challengeRoutes from './routes/challengeRoutes';
 import tokenRoutes from './routes/tokenRoutes';
 import screenTimeRoutes from './routes/screenTimeRoutes';
 import friendRoutes from './routes/friendRoutes';
+import duelRoutes from './routes/duelRoutes';
 import publicRoutes from './routes/publicRoutes';
 import { verifyAuth } from './middleware/verifyAuth';
 
@@ -45,6 +46,7 @@ app.use('/api/challenge', verifyAuth, challengeRoutes);
 app.use('/api', verifyAuth, tokenRoutes);
 app.use('/api/screentime', verifyAuth, screenTimeRoutes);
 app.use('/api/friends', verifyAuth, friendRoutes);
+app.use('/api/duels', verifyAuth, duelRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('IRONMIND TypeScript API with MongoDB is running...');

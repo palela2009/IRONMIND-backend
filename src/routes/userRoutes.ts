@@ -4,6 +4,7 @@ import { UserStats } from '../models/UserStats';
 import { ChallengeResult } from '../models/ChallengeResult';
 import { ScreenTime } from '../models/ScreenTime';
 import { FriendRequest } from '../models/FriendRequest';
+import { Duel } from '../models/Duel';
 import admin from '../config/firebaseAdmin';
 
 const router = Router();
@@ -108,6 +109,9 @@ router.delete('/account', async (req: Request, res: Response): Promise<any> => {
       ChallengeResult.deleteMany({ userId: uid }),
       ScreenTime.deleteMany({ userId: uid }),
       FriendRequest.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
+      // Otherwise the other player is left with a duel that can never resolve, since the
+      // deleted side will never report its usage again.
+      Duel.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
     ]);
 
     try {
