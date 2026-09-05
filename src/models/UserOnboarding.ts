@@ -5,6 +5,8 @@ export interface IUserOnboarding extends Document {
   email?: string;
   displayName?: string;
   photoURL?: string;
+  photoData?: Buffer;
+  photoContentType?: string;
   pushToken?: string | null;
   targetApps: string[];
   goals: string[];
@@ -19,6 +21,8 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   email: { type: String },
   displayName: { type: String },
   photoURL: { type: String },
+  photoData: { type: Buffer, select: false },
+  photoContentType: { type: String },
   pushToken: { type: String, default: null },
   targetApps: { type: [String], default: [] },
   goals: { type: [String], default: [] },

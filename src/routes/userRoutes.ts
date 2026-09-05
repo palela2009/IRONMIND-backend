@@ -68,6 +68,35 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
   }
 });
 
+// POST /api/user/photo — uploads a profile photo, stored directly in MongoDB (no
+// separate object storage service needed). Served back publicly via
+// GET /api/public/photo/:uid so every viewer (including friends) can load it without
+// needing the owner's own auth token.
+router.post('/photo', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { imageBase64, contentType } = req.body;
+    if (!imageBase64 || !contentType) {
+      return res.status(400).json({ message: 'imageBase64 and contentType are required' });
+    }
+
+    const buffer = Buffer.from(imageBase64, 'base64');
+    if (buffer.length > 4 * 1024 * 1024) {
+      return res.status(413).json({ message: 'Image too large' });
+    }
+
+    await UserOnboarding.findOneAndUpdate(
+      { uid: req.uid },
+      { $set: { photoData: buffer, photoContentType: contentType } },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+
+    return res.status(200).json({ message: 'Photo uploaded' });
+  } catch (error) {
+    console.error('Error uploading photo:', error);
+    return res.status(500).json({ message: 'Server error while uploading photo' });
+  }
+});
+
 // DELETE /api/user/account — permanently deletes all data for this account, including
 // the Firebase Auth user itself. Irreversible; there is no soft-delete or recovery.
 router.delete('/account', async (req: Request, res: Response): Promise<any> => {
