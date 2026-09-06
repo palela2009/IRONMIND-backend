@@ -1,12 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { Duel, IDuel } from '../models/Duel';
 import { UserOnboarding } from '../models/UserOnboarding';
-import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
 
 const router = Router();
 
-const XP_PER_LEVEL = 200;
 const DUEL_DURATION_MS = 24 * 60 * 60 * 1000;
 const SETTLE_GRACE_MS = 10 * 60 * 1000;
 
@@ -22,29 +20,34 @@ async function areFriends(a: string, b: string): Promise<boolean> {
   return !!link;
 }
 
+// Both antes are taken when a duel is accepted and held until it resolves, so the pot is
+// guaranteed to exist. Paying out from a balance checked only at settlement would let a
+// loser spend their coins during the 24 hours and win the duel by being broke.
+async function refundAntes(duel: IDuel): Promise<void> {
+  await UserOnboarding.updateMany(
+    { uid: { $in: [duel.fromUid, duel.toUid] } },
+    { $inc: { coins: duel.stake } }
+  );
+}
+
 async function settleDuel(duel: IDuel): Promise<void> {
   const { fromMinutes, toMinutes } = duel;
 
   if (fromMinutes === null || toMinutes === null || fromMinutes === toMinutes) {
     duel.status = 'void';
     await duel.save();
+    await refundAntes(duel);
     return;
   }
 
   const winnerUid = fromMinutes < toMinutes ? duel.fromUid : duel.toUid;
-  const loserUid = winnerUid === duel.fromUid ? duel.toUid : duel.fromUid;
 
   duel.winnerUid = winnerUid;
   duel.status = 'completed';
   await duel.save();
 
-  const loserStats = await UserStats.findOne({ userId: loserUid });
-  if (loserStats) {
-    const levelFloor = Math.max(0, (loserStats.level - 1) * XP_PER_LEVEL);
-    loserStats.currentXP = Math.max(levelFloor, loserStats.currentXP - duel.stake);
-    loserStats.updatedAt = new Date();
-    await loserStats.save();
-  }
+  // Winner takes the whole pot: their own ante back plus the loser's.
+  await UserOnboarding.updateOne({ uid: winnerUid }, { $inc: { coins: duel.stake * 2 } });
 }
 
 async function settleExpiredFor(uid: string): Promise<void> {
@@ -145,6 +148,29 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
       return res.status(404).json({ message: 'Duel not found' });
     }
 
+    // Take both antes atomically. If either player cannot cover it the duel does not start,
+    // and anything already taken is handed straight back.
+    const challenger = await UserOnboarding.findOneAndUpdate(
+      { uid: duel.fromUid, coins: { $gte: duel.stake } },
+      { $inc: { coins: -duel.stake } },
+      { new: true }
+    );
+    if (!challenger) {
+      duel.status = 'cancelled';
+      await duel.save();
+      return res.status(409).json({ message: 'They can no longer cover the ante' });
+    }
+
+    const opponent = await UserOnboarding.findOneAndUpdate(
+      { uid: duel.toUid, coins: { $gte: duel.stake } },
+      { $inc: { coins: -duel.stake } },
+      { new: true }
+    );
+    if (!opponent) {
+      await UserOnboarding.updateOne({ uid: duel.fromUid }, { $inc: { coins: duel.stake } });
+      return res.status(409).json({ message: `You need ${duel.stake} coins to accept` });
+    }
+
     const now = new Date();
     duel.status = 'active';
     duel.startAt = now;
@@ -185,9 +211,14 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<any> => 
       return res.status(400).json({ message: 'That duel is already finished' });
     }
 
+    const wasActive = duel.status === 'active';
+
     duel.status = 'cancelled';
     duel.winnerUid = null;
     await duel.save();
+
+    // Only an accepted duel ever took the antes; a pending one has nothing to give back.
+    if (wasActive) await refundAntes(duel);
 
     return res.status(200).json({ message: 'Duel cancelled' });
   } catch (error) {

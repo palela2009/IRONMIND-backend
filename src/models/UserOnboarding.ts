@@ -18,6 +18,10 @@ export interface IUserOnboarding extends Document {
   streakFreezes: number;
   freezesRefilledAt: Date | null;
   welcomeOfferClosedAt: Date | null;
+  coins: number;
+  coinEarnDate: string | null;
+  coinEarnedToday: number;
+  unlockedThemes: string[];
   themeId: string;
   createdAt: Date;
 }
@@ -45,6 +49,14 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   // Tracked per account rather than on the device so reinstalling, or signing in on a
   // second phone, cannot resurrect a one-time offer the user already declined.
   welcomeOfferClosedAt: { type: Date, default: null },
+
+  // Coins live here rather than on UserStats because UserStats is written wholesale by the
+  // client. A currency that can be spent against other players in duels has to be changed
+  // only through endpoints that decide the amounts themselves.
+  coins: { type: Number, default: 0 },
+  coinEarnDate: { type: String, default: null },
+  coinEarnedToday: { type: Number, default: 0 },
+  unlockedThemes: { type: [String], default: [] },
   themeId: { type: String, default: 'default' },
 
   createdAt: { type: Date, default: Date.now }

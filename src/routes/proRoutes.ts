@@ -6,6 +6,7 @@ const router = Router();
 export type ProPlan = 'monthly' | 'annual' | 'lifetime';
 
 const PRO_MONTHLY_FREEZES = 20;
+const PRO_MONTHLY_COINS = 500;
 
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   monthly: 30,
@@ -43,6 +44,9 @@ async function refillFreezes(uid: string) {
     { uid },
     {
       $max: { streakFreezes: PRO_MONTHLY_FREEZES },
+      // The stipend is added rather than topped up to, so it stacks with coins the user
+      // earned themselves instead of quietly replacing them.
+      $inc: { coins: PRO_MONTHLY_COINS },
       $set: { freezesRefilledAt: new Date() },
     },
     { new: true }
@@ -56,6 +60,8 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     plan: doc?.proPlan ?? null,
     expiresAt: doc?.proExpiresAt ?? null,
     streakFreezes: doc?.streakFreezes ?? 0,
+    coins: doc?.coins ?? 0,
+    unlockedThemes: doc?.unlockedThemes ?? [],
     themeId: doc?.themeId ?? 'default',
     // Only offered to an account that has never closed it and is not already paying.
     welcomeOffer: !!doc && !doc.welcomeOfferClosedAt && !isProActive(doc),
