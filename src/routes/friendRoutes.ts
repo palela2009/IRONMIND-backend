@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
+import { isProActive } from './proRoutes';
 
 const router = Router();
 
@@ -166,6 +167,10 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         longestStreak: statsMap.get(fuid)?.longestStreak ?? 0,
         totalChallenges: statsMap.get(fuid)?.totalChallenges ?? 0,
         level: statsMap.get(fuid)?.level ?? 1,
+        successCount: statsMap.get(fuid)?.successCount ?? 0,
+        bestReactionTime: statsMap.get(fuid)?.bestReactionTime ?? 0,
+        currentXP: statsMap.get(fuid)?.currentXP ?? 0,
+        isPro: isProActive(profileMap.get(fuid) ?? null),
       }))
       .sort((a, b) => b.currentStreak - a.currentStreak);
 
