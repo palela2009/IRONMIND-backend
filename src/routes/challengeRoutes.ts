@@ -18,10 +18,6 @@ router.post('/notify', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// GET /api/challenge/results — the user's challenge history, newest first.
-// Stats already restore from the cloud on a new device/account switch, but history
-// never did — it only ever lived in local storage, so switching accounts left the
-// recent-challenges list, per-app breakdown and weekly chart all showing nothing.
 router.get('/results', async (req: Request, res: Response): Promise<any> => {
   try {
     const results = await ChallengeResult.find({ userId: req.uid })

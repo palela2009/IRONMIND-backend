@@ -9,9 +9,6 @@ import admin from '../config/firebaseAdmin';
 
 const router = Router();
 
-// GET /api/user/onboarding — lets a returning account restore its own real settings
-// from the cloud instead of being forced through onboarding again after a local reset
-// (e.g. switching to this account on a device that last had a different one signed in).
 router.get('/onboarding', async (req: Request, res: Response): Promise<any> => {
   try {
     const doc = await UserOnboarding.findOne({ uid: req.uid });
@@ -38,9 +35,6 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
 
     const existing = await UserOnboarding.findOne({ uid });
 
-    // A brand new account must go through real onboarding — but an existing account can
-    // send just identity fields (e.g. an automatic post-login resync) without resending
-    // its full settings, so that never overwrites targetApps/goals with nothing.
     if (!existing && (!targetApps || !goals || !difficultyLevel)) {
       return res.status(400).json({ message: 'targetApps, goals, and difficultyLevel are required' });
     }
@@ -69,10 +63,6 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
   }
 });
 
-// POST /api/user/photo — uploads a profile photo, stored directly in MongoDB (no
-// separate object storage service needed). Served back publicly via
-// GET /api/public/photo/:uid so every viewer (including friends) can load it without
-// needing the owner's own auth token.
 router.post('/photo', async (req: Request, res: Response): Promise<any> => {
   try {
     const { imageBase64, contentType } = req.body;
@@ -98,8 +88,6 @@ router.post('/photo', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// DELETE /api/user/account — permanently deletes all data for this account, including
-// the Firebase Auth user itself. Irreversible; there is no soft-delete or recovery.
 router.delete('/account', async (req: Request, res: Response): Promise<any> => {
   const uid = req.uid;
   try {
@@ -109,16 +97,12 @@ router.delete('/account', async (req: Request, res: Response): Promise<any> => {
       ChallengeResult.deleteMany({ userId: uid }),
       ScreenTime.deleteMany({ userId: uid }),
       FriendRequest.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
-      // Otherwise the other player is left with a duel that can never resolve, since the
-      // deleted side will never report its usage again.
       Duel.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
     ]);
 
     try {
       await admin.auth().deleteUser(uid);
     } catch (authError) {
-      // Data is already gone at this point — log but don't fail the request over an
-      // auth-record cleanup issue (e.g. already deleted, or a transient Admin SDK error).
       console.error(`Error deleting Firebase Auth user ${uid}:`, authError);
     }
 

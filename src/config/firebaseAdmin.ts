@@ -1,9 +1,6 @@
 import dotenv from 'dotenv';
 import admin from 'firebase-admin';
 
-// Imports resolve before any statement in index.ts runs (including its own
-// dotenv.config() call), so this module must load its own env vars rather
-// than rely on that ordering.
 dotenv.config();
 
 if (!admin.apps.length) {

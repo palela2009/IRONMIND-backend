@@ -6,9 +6,6 @@ import { FriendRequest } from '../models/FriendRequest';
 
 const router = Router();
 
-// Mirrors the client's leveling constant. A loser's XP is floored at the start of their
-// current level so a duel can never demote them — losing a rank to one bad day reads as a
-// bug and punishes exactly the new users the feature is meant to hook.
 const XP_PER_LEVEL = 200;
 const DUEL_DURATION_MS = 24 * 60 * 60 * 1000;
 const SETTLE_GRACE_MS = 10 * 60 * 1000;
@@ -25,13 +22,6 @@ async function areFriends(a: string, b: string): Promise<boolean> {
   return !!link;
 }
 
-// Settles one finished duel. Lower minutes on the target app wins.
-//
-// A missing report voids the duel instead of awarding a walkover, and that is deliberate:
-// with "fewest minutes wins", the strongest possible play would otherwise be to disable
-// tracking — force-stop the app, revoke Usage Access — and report nothing at all. Voiding
-// makes that worth zero. It also protects honest users whose OEM killed the foreground
-// service, who would otherwise silently "win" duels they actually lost.
 async function settleDuel(duel: IDuel): Promise<void> {
   const { fromMinutes, toMinutes } = duel;
 
@@ -57,15 +47,7 @@ async function settleDuel(duel: IDuel): Promise<void> {
   }
 }
 
-// Render's free tier has no scheduler, so duels settle lazily: any expired duel involving
-// this user is resolved the moment they ask for their list. That makes settlement depend on
-// someone opening the app rather than on a cron that doesn't exist.
 async function settleExpiredFor(uid: string): Promise<void> {
-  // The grace period matters: a client fetches its duels and only then reports its final
-  // usage, so settling the instant endAt passes would resolve the duel against stale
-  // numbers a moment before the real ones arrive. Within the grace window the duel stays
-  // active and the incoming report settles it directly; past it, the last live report
-  // from each side is used.
   const cutoff = new Date(Date.now() - SETTLE_GRACE_MS);
   const expired = await Duel.find({
     status: 'active',
@@ -77,7 +59,6 @@ async function settleExpiredFor(uid: string): Promise<void> {
   }
 }
 
-// POST /api/duels — challenge a friend. { toUid, app, stake? }
 router.post('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid as string;
@@ -93,8 +74,6 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(403).json({ message: 'You can only duel friends' });
     }
 
-    // One live duel per pair keeps the stakes legible — a stack of concurrent duels against
-    // the same person on the same app would all resolve off the same screen-time number.
     const existing = await Duel.findOne({
       status: { $in: ['pending', 'active'] },
       $or: [{ fromUid: uid, toUid }, { fromUid: toUid, toUid: uid }],
@@ -118,7 +97,6 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// GET /api/duels — every duel involving me, newest first, with expired ones settled first.
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid as string;
@@ -132,8 +110,6 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     const profiles = await UserOnboarding.find({ uid: { $in: opponentUids } });
     const profileMap = new Map(profiles.map((p) => [p.uid, p]));
 
-    // Flattened to "my side / their side" so the client never has to work out which end of
-    // the duel it is on before rendering a row.
     const result = duels.map((d) => {
       const isFrom = d.fromUid === uid;
       const opponentUid = isFrom ? d.toUid : d.fromUid;
@@ -150,9 +126,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         myMinutes: isFrom ? d.fromMinutes : d.toMinutes,
         theirMinutes: isFrom ? d.toMinutes : d.fromMinutes,
         theirReportedAt: isFrom ? d.toReportedAt : d.fromReportedAt,
-        // Only meaningful once completed; null on a void duel, which has no winner by design.
         iWon: d.status === 'completed' ? d.winnerUid === uid : null,
-        // Drives whether the client shows accept/decline buttons for this row.
         incoming: !isFrom,
       };
     });
@@ -164,7 +138,6 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// POST /api/duels/:id/accept — starts the rolling 24h window now.
 router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => {
   try {
     const duel = await Duel.findById(req.params.id);
@@ -185,7 +158,6 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
   }
 });
 
-// POST /api/duels/:id/decline
 router.post('/:id/decline', async (req: Request, res: Response): Promise<any> => {
   try {
     const duel = await Duel.findById(req.params.id);
@@ -201,9 +173,6 @@ router.post('/:id/decline', async (req: Request, res: Response): Promise<any> =>
   }
 });
 
-// POST /api/duels/:id/report — { minutes } measured by my own device over the duel window.
-// Called repeatedly while a duel is live so both sides can see a running score, and once
-// more after it closes to supply the final figure.
 router.post('/:id/report', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid as string;
@@ -217,8 +186,6 @@ router.post('/:id/report', async (req: Request, res: Response): Promise<any> => 
     if (!duel || (duel.fromUid !== uid && duel.toUid !== uid)) {
       return res.status(404).json({ message: 'Duel not found' });
     }
-    // A completed duel is final — accepting late reports would let a player rewrite a result
-    // after seeing it.
     if (duel.status !== 'active') {
       return res.status(400).json({ message: 'Duel is not active' });
     }
@@ -233,8 +200,6 @@ router.post('/:id/report', async (req: Request, res: Response): Promise<any> => 
     }
     await duel.save();
 
-    // Reporting right after the window closes is the normal path to settlement — the client
-    // sends its final number and the duel resolves in the same request.
     if (duel.endAt && now >= duel.endAt) {
       await settleDuel(duel);
     }

@@ -14,7 +14,6 @@ const friendRequestSchema = new Schema<IFriendRequest>({
   createdAt: { type: Date, default: Date.now },
 });
 
-// One request per direction — re-sending after a reject (which deletes the doc) is fine.
 friendRequestSchema.index({ fromUid: 1, toUid: 1 }, { unique: true });
 
 export const FriendRequest = model<IFriendRequest>('FriendRequest', friendRequestSchema);

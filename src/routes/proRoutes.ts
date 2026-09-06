@@ -5,19 +5,14 @@ const router = Router();
 
 export type ProPlan = 'monthly' | 'annual' | 'lifetime';
 
-// Freezes granted when a subscription starts or renews. Deliberately finite: unlimited
-// streak protection would make the streak — the number the whole app is built around —
-// meaningless for paying users.
 const FREEZES_PER_GRANT = 3;
 
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   monthly: 30,
   annual: 365,
-  lifetime: null, // no expiry
+  lifetime: null, 
 };
 
-// Single source of truth for "is this account Pro right now", derived rather than stored so
-// a lapsed subscription can never leave a stale flag granting free access.
 export function isProActive(doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt'> | null): boolean {
   if (!doc?.proPlan) return false;
   if (doc.proPlan === 'lifetime') return true;
@@ -34,7 +29,6 @@ function entitlementPayload(doc: IUserOnboarding | null) {
   };
 }
 
-// GET /api/pro — current entitlement for the signed-in user.
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const doc = await UserOnboarding.findOne({ uid: req.uid });
@@ -45,13 +39,6 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// POST /api/pro/activate — { plan }
-//
-// This is the seam that real Google Play billing will plug into. Today it trusts the client,
-// which is only acceptable because it is locked behind ALLOW_DEV_PRO and exists so the Pro
-// experience can be built and tested before a Play Console account is available. When
-// billing lands, this handler verifies a purchase token against the Play Developer API and
-// the env flag goes away — the client contract stays identical.
 router.post('/activate', async (req: Request, res: Response): Promise<any> => {
   try {
     if (process.env.ALLOW_DEV_PRO !== 'true') {
@@ -70,8 +57,6 @@ router.post('/activate', async (req: Request, res: Response): Promise<any> => {
       { uid: req.uid },
       {
         $set: { proPlan: plan, proExpiresAt: expiresAt },
-        // Incremented rather than assigned so activating doesn't wipe freezes the user
-        // already earned from rewarded ads.
         $inc: { streakFreezes: FREEZES_PER_GRANT },
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
@@ -85,7 +70,6 @@ router.post('/activate', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// POST /api/pro/cancel — drops back to free. Dev/testing counterpart to activate.
 router.post('/cancel', async (req: Request, res: Response): Promise<any> => {
   try {
     if (process.env.ALLOW_DEV_PRO !== 'true') {
@@ -103,10 +87,6 @@ router.post('/cancel', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// POST /api/pro/freeze/use — spend one freeze to absorb a failed challenge.
-//
-// The check and the decrement are one atomic update: a plain read-then-write would let two
-// challenges resolving at once both see the last freeze and each keep their streak.
 router.post('/freeze/use', async (req: Request, res: Response): Promise<any> => {
   try {
     const doc = await UserOnboarding.findOneAndUpdate(
@@ -126,7 +106,6 @@ router.post('/freeze/use', async (req: Request, res: Response): Promise<any> => 
   }
 });
 
-// POST /api/pro/freeze/grant — award a freeze, e.g. after a rewarded ad.
 router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> => {
   try {
     const doc = await UserOnboarding.findOneAndUpdate(
@@ -141,7 +120,6 @@ router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> =
   }
 });
 
-// POST /api/pro/theme — { themeId }
 router.post('/theme', async (req: Request, res: Response): Promise<any> => {
   try {
     const { themeId } = req.body;

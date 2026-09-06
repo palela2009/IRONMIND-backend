@@ -34,15 +34,9 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   dailyChallengeLimit: { type: Number, default: 5 },
   inviteCode: { type: String, unique: true, sparse: true },
 
-  // Deliberately no `isPro` boolean. Entitlement is derived from plan + expiry every time
-  // it's read, so it can't drift: a stored flag left true after a subscription lapsed would
-  // be an unnoticed free subscription, and the two would have to be kept in sync forever.
-  // Lifetime is represented as a plan with no expiry rather than a separate flag.
   proPlan: { type: String, enum: ['monthly', 'annual', 'lifetime', null], default: null },
   proExpiresAt: { type: Date, default: null },
 
-  // Consumable, not a boolean — a freeze is spent to absorb one failed challenge, and both
-  // Pro grants and rewarded ads top the same counter up.
   streakFreezes: { type: Number, default: 0 },
   themeId: { type: String, default: 'default' },
 

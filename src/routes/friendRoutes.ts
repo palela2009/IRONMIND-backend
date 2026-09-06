@@ -5,7 +5,6 @@ import { FriendRequest } from '../models/FriendRequest';
 
 const router = Router();
 
-// Excludes 0/O/1/I so codes read back unambiguously when shared as plain text.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function generateCode(length = 6): string {
@@ -16,14 +15,10 @@ function generateCode(length = 6): string {
   return code;
 }
 
-// Falls back to email when displayName was never set (e.g. email/password accounts,
-// or a profile synced before displayName started being sent) — "Unknown" only when
-// neither is available at all.
 function nameFor(profile?: { displayName?: string; email?: string } | null): string {
   return profile?.displayName || profile?.email || 'Unknown';
 }
 
-// GET /api/friends/code — get or create my invite code
 router.get('/code', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
@@ -50,7 +45,6 @@ router.get('/code', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// POST /api/friends/add — { code } → send a request, or auto-accept if they already sent one to me
 router.post('/add', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
@@ -93,7 +87,6 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// GET /api/friends/requests — incoming pending requests
 router.get('/requests', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
@@ -117,7 +110,6 @@ router.get('/requests', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// POST /api/friends/requests/:id/accept
 router.post('/requests/:id/accept', async (req: Request, res: Response): Promise<any> => {
   try {
     const request = await FriendRequest.findById(req.params.id);
@@ -133,7 +125,6 @@ router.post('/requests/:id/accept', async (req: Request, res: Response): Promise
   }
 });
 
-// POST /api/friends/requests/:id/reject
 router.post('/requests/:id/reject', async (req: Request, res: Response): Promise<any> => {
   try {
     const request = await FriendRequest.findById(req.params.id);
@@ -148,7 +139,6 @@ router.post('/requests/:id/reject', async (req: Request, res: Response): Promise
   }
 });
 
-// GET /api/friends — accepted friends with stats, sorted by current streak
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
@@ -175,8 +165,6 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         currentStreak: statsMap.get(fuid)?.currentStreak ?? 0,
         longestStreak: statsMap.get(fuid)?.longestStreak ?? 0,
         totalChallenges: statsMap.get(fuid)?.totalChallenges ?? 0,
-        // Drives the friend's Iron Rank badge on the leaderboard. Defaults to 1 rather
-        // than 0 so a friend with no stats row yet still resolves to a real rank.
         level: statsMap.get(fuid)?.level ?? 1,
       }))
       .sort((a, b) => b.currentStreak - a.currentStreak);
@@ -188,7 +176,6 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// DELETE /api/friends/:uid — remove a friend (either direction)
 router.delete('/:uid', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
