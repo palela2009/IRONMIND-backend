@@ -21,6 +21,7 @@ router.get('/onboarding', async (req: Request, res: Response): Promise<any> => {
       goals: doc.goals,
       difficultyLevel: doc.difficultyLevel,
       dailyChallengeLimit: doc.dailyChallengeLimit,
+      appLimits: doc.appLimits ?? [],
     });
   } catch (error) {
     console.error('Error fetching onboarding:', error);
@@ -31,7 +32,7 @@ router.get('/onboarding', async (req: Request, res: Response): Promise<any> => {
 router.post('/onboarding', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
-    const { email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit } = req.body;
+    const { email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit, appLimits } = req.body;
 
     const existing = await UserOnboarding.findOne({ uid });
 
@@ -47,6 +48,11 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
     if (goals !== undefined) setFields.goals = goals;
     if (difficultyLevel !== undefined) setFields.difficultyLevel = difficultyLevel;
     if (dailyChallengeLimit !== undefined) setFields.dailyChallengeLimit = dailyChallengeLimit;
+    if (Array.isArray(appLimits)) {
+      setFields.appLimits = appLimits
+        .filter((l: any) => typeof l?.app === 'string' && Number.isFinite(l?.minutes) && l.minutes >= 0)
+        .map((l: any) => ({ app: l.app, minutes: Math.round(l.minutes) }));
+    }
 
     const onboarding = await UserOnboarding.findOneAndUpdate(
       { uid },
