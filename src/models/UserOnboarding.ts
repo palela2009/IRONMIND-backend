@@ -17,6 +17,7 @@ export interface IUserOnboarding extends Document {
   proExpiresAt: Date | null;
   streakFreezes: number;
   freezesRefilledAt: Date | null;
+  welcomeOfferClosedAt: Date | null;
   themeId: string;
   createdAt: Date;
 }
@@ -40,6 +41,10 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
 
   streakFreezes: { type: Number, default: 0 },
   freezesRefilledAt: { type: Date, default: null },
+
+  // Tracked per account rather than on the device so reinstalling, or signing in on a
+  // second phone, cannot resurrect a one-time offer the user already declined.
+  welcomeOfferClosedAt: { type: Date, default: null },
   themeId: { type: String, default: 'default' },
 
   createdAt: { type: Date, default: Date.now }

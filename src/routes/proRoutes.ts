@@ -57,6 +57,8 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     expiresAt: doc?.proExpiresAt ?? null,
     streakFreezes: doc?.streakFreezes ?? 0,
     themeId: doc?.themeId ?? 'default',
+    // Only offered to an account that has never closed it and is not already paying.
+    welcomeOffer: !!doc && !doc.welcomeOfferClosedAt && !isProActive(doc),
   };
 }
 
@@ -165,6 +167,20 @@ router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> =
   } catch (error) {
     console.error('Error granting freeze:', error);
     return res.status(500).json({ message: 'Server error while granting freeze' });
+  }
+});
+
+router.post('/offer/close', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const doc = await UserOnboarding.findOneAndUpdate(
+      { uid: req.uid },
+      { $set: { welcomeOfferClosedAt: new Date() } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+    return res.status(200).json(entitlementPayload(doc));
+  } catch (error) {
+    console.error('Error closing welcome offer:', error);
+    return res.status(500).json({ message: 'Server error while closing offer' });
   }
 });
 

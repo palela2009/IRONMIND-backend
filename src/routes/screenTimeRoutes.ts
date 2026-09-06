@@ -31,6 +31,33 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
+// Must be declared before '/:userId', which would otherwise capture "history" as a user id.
+router.get('/history', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
+
+    const since = new Date();
+    since.setDate(since.getDate() - (days - 1));
+    const sinceKey = since.toISOString().slice(0, 10);
+
+    const records = await ScreenTime.find({
+      userId: req.uid,
+      date: { $gte: sinceKey },
+    }).sort({ date: 1 });
+
+    const result = records.map((r) => ({
+      date: r.date,
+      total: r.apps.reduce((sum, a) => sum + a.minutes, 0),
+      apps: r.apps,
+    }));
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Error fetching screen time history:', error);
+    return res.status(500).json({ message: 'Server error while fetching history' });
+  }
+});
+
 router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
   try {
     const { userId } = req.params;
