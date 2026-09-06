@@ -63,8 +63,10 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     coins: doc?.coins ?? 0,
     unlockedThemes: doc?.unlockedThemes ?? [],
     themeId: doc?.themeId ?? 'default',
-    // Only offered to an account that has never closed it and is not already paying.
-    welcomeOffer: !!doc && !doc.welcomeOfferClosedAt && !isProActive(doc),
+    // Eligible until the account explicitly closes it. A missing document counts as eligible
+    // rather than ineligible: the document is only created during onboarding, so requiring one
+    // meant the newest users - the entire audience for a welcome offer - never saw it.
+    welcomeOffer: !doc?.welcomeOfferClosedAt && !isProActive(doc),
   };
 }
 
