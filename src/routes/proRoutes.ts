@@ -13,8 +13,21 @@ const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   lifetime: null, 
 };
 
-export function isProActive(doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt'> | null): boolean {
-  if (!doc?.proPlan) return false;
+const ownerEmails = (): string[] =>
+  (process.env.OWNER_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+export function isOwner(email?: string | null): boolean {
+  if (!email) return false;
+  return ownerEmails().includes(email.toLowerCase());
+}
+
+export function isProActive(doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt' | 'email'> | null): boolean {
+  if (!doc) return false;
+  if (isOwner(doc.email)) return true;
+  if (!doc.proPlan) return false;
   if (doc.proPlan === 'lifetime') return true;
   return !!doc.proExpiresAt && doc.proExpiresAt.getTime() > Date.now();
 }
@@ -31,7 +44,20 @@ function entitlementPayload(doc: IUserOnboarding | null) {
 
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
-    const doc = await UserOnboarding.findOne({ uid: req.uid });
+    let doc = await UserOnboarding.findOne({ uid: req.uid });
+
+    if (doc && isOwner(doc.email) && doc.proPlan !== 'lifetime') {
+      doc = await UserOnboarding.findOneAndUpdate(
+        { uid: req.uid },
+        {
+          $set: { proPlan: 'lifetime', proExpiresAt: null },
+          $inc: { streakFreezes: FREEZES_PER_GRANT },
+        },
+        { new: true }
+      );
+      console.log(`👑 [API]: Owner Pro granted to ${req.uid}`);
+    }
+
     return res.status(200).json(entitlementPayload(doc));
   } catch (error) {
     console.error('Error fetching entitlement:', error);

@@ -173,6 +173,29 @@ router.post('/:id/decline', async (req: Request, res: Response): Promise<any> =>
   }
 });
 
+router.post('/:id/cancel', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const uid = req.uid as string;
+    const duel = await Duel.findById(req.params.id);
+
+    if (!duel || (duel.fromUid !== uid && duel.toUid !== uid)) {
+      return res.status(404).json({ message: 'Duel not found' });
+    }
+    if (duel.status !== 'pending' && duel.status !== 'active') {
+      return res.status(400).json({ message: 'That duel is already finished' });
+    }
+
+    duel.status = 'cancelled';
+    duel.winnerUid = null;
+    await duel.save();
+
+    return res.status(200).json({ message: 'Duel cancelled' });
+  } catch (error) {
+    console.error('Error cancelling duel:', error);
+    return res.status(500).json({ message: 'Server error while cancelling duel' });
+  }
+});
+
 router.post('/:id/report', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid as string;

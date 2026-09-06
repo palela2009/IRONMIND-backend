@@ -1,6 +1,6 @@
 import { Schema, model, Document } from 'mongoose';
 
-export type DuelStatus = 'pending' | 'active' | 'completed' | 'declined' | 'void';
+export type DuelStatus = 'pending' | 'active' | 'completed' | 'declined' | 'void' | 'cancelled';
 
 export interface IDuel extends Document {
   fromUid: string;
@@ -23,7 +23,7 @@ const duelSchema = new Schema<IDuel>({
   toUid: { type: String, required: true },
   app: { type: String, required: true },
   stake: { type: Number, default: 100 },
-  status: { type: String, enum: ['pending', 'active', 'completed', 'declined', 'void'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'active', 'completed', 'declined', 'void', 'cancelled'], default: 'pending' },
 
   startAt: { type: Date, default: null },
   endAt: { type: Date, default: null },
