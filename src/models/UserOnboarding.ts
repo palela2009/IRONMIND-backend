@@ -18,6 +18,8 @@ export interface IUserOnboarding extends Document {
   streakFreezes: number;
   freezesRefilledAt: Date | null;
   welcomeOfferClosedAt: Date | null;
+  trialStartedAt: Date | null;
+  trialEndsAt: Date | null;
   coins: number;
   coinEarnDate: string | null;
   coinEarnedToday: number;
@@ -49,6 +51,13 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   // Tracked per account rather than on the device so reinstalling, or signing in on a
   // second phone, cannot resurrect a one-time offer the user already declined.
   welcomeOfferClosedAt: { type: Date, default: null },
+
+  // An app-side trial, granted once per account. This is a stand-in for Google Play's own
+  // free trial, which cannot exist until there is a Play Console subscription to attach it
+  // to. trialStartedAt is what makes it once-only: it is never cleared, so a lapsed trial
+  // cannot be restarted by the same account.
+  trialStartedAt: { type: Date, default: null },
+  trialEndsAt: { type: Date, default: null },
 
   // Coins live here rather than on UserStats because UserStats is written wholesale by the
   // client. A currency that can be spent against other players in duels has to be changed

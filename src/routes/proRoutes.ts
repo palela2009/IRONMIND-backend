@@ -8,6 +8,11 @@ export type ProPlan = 'monthly' | 'annual' | 'lifetime';
 const PRO_MONTHLY_FREEZES = 20;
 const PRO_MONTHLY_COINS = 500;
 
+// Seven rather than three: Advanced Analytics is empty on day one and needs several days of
+// history before it shows anything, so a shorter trial has people judging the headline Pro
+// feature while it is still a blank chart.
+const TRIAL_DAYS = 7;
+
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   monthly: 30,
   annual: 365,
@@ -25,9 +30,18 @@ export function isOwner(email?: string | null): boolean {
   return ownerEmails().includes(email.toLowerCase());
 }
 
-export function isProActive(doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt' | 'email'> | null): boolean {
+export function isTrialActive(doc: Pick<IUserOnboarding, 'trialEndsAt'> | null): boolean {
+  return !!doc?.trialEndsAt && doc.trialEndsAt.getTime() > Date.now();
+}
+
+export function isProActive(
+  doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt' | 'email' | 'trialEndsAt'> | null
+): boolean {
   if (!doc) return false;
   if (isOwner(doc.email)) return true;
+  // A live trial grants the full entitlement. Everything gated on Pro therefore works during
+  // the trial without any feature needing to know a trial exists.
+  if (isTrialActive(doc)) return true;
   if (!doc.proPlan) return false;
   if (doc.proPlan === 'lifetime') return true;
   return !!doc.proExpiresAt && doc.proExpiresAt.getTime() > Date.now();
@@ -67,6 +81,10 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     // rather than ineligible: the document is only created during onboarding, so requiring one
     // meant the newest users - the entire audience for a welcome offer - never saw it.
     welcomeOffer: !doc?.welcomeOfferClosedAt && !isProActive(doc),
+    onTrial: isTrialActive(doc),
+    trialEndsAt: doc?.trialEndsAt ?? null,
+    // Offered only to an account that has never started one, so a lapsed trial cannot restart.
+    trialAvailable: !doc?.trialStartedAt && !doc?.proPlan,
   };
 }
 
@@ -175,6 +193,37 @@ router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> =
   } catch (error) {
     console.error('Error granting freeze:', error);
     return res.status(500).json({ message: 'Server error while granting freeze' });
+  }
+});
+
+// POST /api/pro/trial/start — begins the one-time free trial.
+//
+// Guarded on trialStartedAt being unset, atomically, so repeated taps or a retry cannot
+// extend an existing trial.
+router.post('/trial/start', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const now = new Date();
+    const doc = await UserOnboarding.findOneAndUpdate(
+      { uid: req.uid, trialStartedAt: null, proPlan: null },
+      {
+        $set: {
+          trialStartedAt: now,
+          trialEndsAt: new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
+          welcomeOfferClosedAt: now,
+        },
+      },
+      { new: true }
+    );
+
+    if (!doc) {
+      return res.status(409).json({ message: 'Trial already used' });
+    }
+
+    console.log(`🎁 [API]: Trial started for ${req.uid}`);
+    return res.status(200).json(entitlementPayload(doc));
+  } catch (error) {
+    console.error('Error starting trial:', error);
+    return res.status(500).json({ message: 'Server error while starting trial' });
   }
 });
 
