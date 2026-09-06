@@ -52,6 +52,7 @@ async function refillFreezes(uid: string) {
 function entitlementPayload(doc: IUserOnboarding | null) {
   return {
     isPro: isProActive(doc),
+    isOwner: isOwner(doc?.email),
     plan: doc?.proPlan ?? null,
     expiresAt: doc?.proExpiresAt ?? null,
     streakFreezes: doc?.streakFreezes ?? 0,

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
-import { isProActive } from './proRoutes';
+import { isProActive, isOwner } from './proRoutes';
 
 const router = Router();
 
@@ -171,6 +171,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         bestReactionTime: statsMap.get(fuid)?.bestReactionTime ?? 0,
         currentXP: statsMap.get(fuid)?.currentXP ?? 0,
         isPro: isProActive(profileMap.get(fuid) ?? null),
+        isOwner: isOwner(profileMap.get(fuid)?.email),
       }))
       .sort((a, b) => b.currentStreak - a.currentStreak);
 
