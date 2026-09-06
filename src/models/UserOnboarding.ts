@@ -21,6 +21,7 @@ export interface IUserOnboarding extends Document {
   trialStartedAt: Date | null;
   trialEndsAt: Date | null;
   coins: number;
+  starterCoinsGrantedAt: Date | null;
   coinEarnDate: string | null;
   coinEarnedToday: number;
   unlockedThemes: string[];
@@ -63,6 +64,11 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   // client. A currency that can be spent against other players in duels has to be changed
   // only through endpoints that decide the amounts themselves.
   coins: { type: Number, default: 0 },
+
+  // Granted once, on first read. Without a starting balance nobody could afford a duel ante
+  // until they had won ten challenges, so the whole duel feature was unreachable on a new
+  // account. Recorded as a timestamp rather than a boolean so it cannot be re-granted.
+  starterCoinsGrantedAt: { type: Date, default: null },
   coinEarnDate: { type: String, default: null },
   coinEarnedToday: { type: Number, default: 0 },
   unlockedThemes: { type: [String], default: [] },

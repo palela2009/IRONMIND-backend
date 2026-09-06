@@ -13,6 +13,10 @@ const PRO_MONTHLY_COINS = 500;
 // feature while it is still a blank chart.
 const TRIAL_DAYS = 7;
 
+// Enough to fund a duel ante on day one, so the feature is reachable immediately, but short
+// of the 200 a streak freeze costs — the shop should still be earned rather than handed over.
+const STARTER_COINS = 150;
+
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   monthly: 30,
   annual: 365,
@@ -99,6 +103,14 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         { new: true }
       );
       console.log(`👑 [API]: Owner Pro granted to ${req.uid}`);
+    }
+
+    if (doc && !doc.starterCoinsGrantedAt) {
+      doc = await UserOnboarding.findOneAndUpdate(
+        { uid: req.uid, starterCoinsGrantedAt: null },
+        { $inc: { coins: STARTER_COINS }, $set: { starterCoinsGrantedAt: new Date() } },
+        { new: true }
+      ) ?? doc;
     }
 
     if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {

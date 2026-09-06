@@ -85,11 +85,21 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'You already have a duel running with them' });
     }
 
+    const ante = Number(stake) > 0 ? Number(stake) : 100;
+
+    // Checked when the challenge is sent, not only when it is accepted. Letting someone send
+    // a duel they cannot fund means the opponent accepts and the whole thing fails on their
+    // side, which reads as the opponent's problem rather than the challenger's.
+    const me = await UserOnboarding.findOne({ uid });
+    if ((me?.coins ?? 0) < ante) {
+      return res.status(409).json({ message: `You need ${ante} coins to start this duel` });
+    }
+
     const duel = await Duel.create({
       fromUid: uid,
       toUid,
       app: String(app),
-      stake: Number(stake) > 0 ? Number(stake) : 100,
+      stake: ante,
       status: 'pending',
     });
 
@@ -144,8 +154,13 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
 router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => {
   try {
     const duel = await Duel.findById(req.params.id);
-    if (!duel || duel.toUid !== req.uid || duel.status !== 'pending') {
+    if (!duel || duel.toUid !== req.uid) {
       return res.status(404).json({ message: 'Duel not found' });
+    }
+    // Distinguished from "not found" deliberately: reporting a duel that plainly exists on
+    // screen as missing sends the user hunting for a bug that isn't there.
+    if (duel.status !== 'pending') {
+      return res.status(409).json({ message: `That duel is already ${duel.status}` });
     }
 
     // Take both antes atomically. If either player cannot cover it the duel does not start,
@@ -156,9 +171,10 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
       { new: true }
     );
     if (!challenger) {
-      duel.status = 'cancelled';
-      await duel.save();
-      return res.status(409).json({ message: 'They can no longer cover the ante' });
+      // The duel stays pending. Cancelling it over a temporary shortfall destroyed a duel
+      // the challenger could have funded a minute later, and the second attempt then failed
+      // as "not found" because the first attempt had already killed it.
+      return res.status(409).json({ message: 'They cannot cover the ante right now' });
     }
 
     const opponent = await UserOnboarding.findOneAndUpdate(
