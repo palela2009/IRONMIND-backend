@@ -16,6 +16,7 @@ export interface IUserOnboarding extends Document {
   proPlan: 'monthly' | 'annual' | 'lifetime' | null;
   proExpiresAt: Date | null;
   streakFreezes: number;
+  freezesRefilledAt: Date | null;
   themeId: string;
   createdAt: Date;
 }
@@ -38,6 +39,7 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   proExpiresAt: { type: Date, default: null },
 
   streakFreezes: { type: Number, default: 0 },
+  freezesRefilledAt: { type: Date, default: null },
   themeId: { type: String, default: 'default' },
 
   createdAt: { type: Date, default: Date.now }

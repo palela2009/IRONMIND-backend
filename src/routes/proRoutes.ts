@@ -5,7 +5,7 @@ const router = Router();
 
 export type ProPlan = 'monthly' | 'annual' | 'lifetime';
 
-const FREEZES_PER_GRANT = 3;
+const PRO_MONTHLY_FREEZES = 20;
 
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   monthly: 30,
@@ -32,6 +32,23 @@ export function isProActive(doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt
   return !!doc.proExpiresAt && doc.proExpiresAt.getTime() > Date.now();
 }
 
+function needsRefill(last: Date | null | undefined): boolean {
+  if (!last) return true;
+  const now = new Date();
+  return last.getUTCFullYear() !== now.getUTCFullYear() || last.getUTCMonth() !== now.getUTCMonth();
+}
+
+async function refillFreezes(uid: string) {
+  return UserOnboarding.findOneAndUpdate(
+    { uid },
+    {
+      $max: { streakFreezes: PRO_MONTHLY_FREEZES },
+      $set: { freezesRefilledAt: new Date() },
+    },
+    { new: true }
+  );
+}
+
 function entitlementPayload(doc: IUserOnboarding | null) {
   return {
     isPro: isProActive(doc),
@@ -49,13 +66,15 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     if (doc && isOwner(doc.email) && doc.proPlan !== 'lifetime') {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid },
-        {
-          $set: { proPlan: 'lifetime', proExpiresAt: null },
-          $inc: { streakFreezes: FREEZES_PER_GRANT },
-        },
+        { $set: { proPlan: 'lifetime', proExpiresAt: null } },
         { new: true }
       );
       console.log(`👑 [API]: Owner Pro granted to ${req.uid}`);
+    }
+
+    if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {
+      doc = await refillFreezes(req.uid as string);
+      console.log(`❄ [API]: Monthly freezes refilled for ${req.uid}`);
     }
 
     return res.status(200).json(entitlementPayload(doc));
@@ -79,14 +98,16 @@ router.post('/activate', async (req: Request, res: Response): Promise<any> => {
     const days = PLAN_DURATION_DAYS[plan];
     const expiresAt = days === null ? null : new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-    const doc = await UserOnboarding.findOneAndUpdate(
+    await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
       {
         $set: { proPlan: plan, proExpiresAt: expiresAt },
-        $inc: { streakFreezes: FREEZES_PER_GRANT },
+        $max: { streakFreezes: PRO_MONTHLY_FREEZES },
+        $currentDate: { freezesRefilledAt: true },
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+    const doc = await UserOnboarding.findOne({ uid: req.uid });
 
     console.log(`⭐ [API]: Pro activated (${plan}) for user: ${req.uid}`);
     return res.status(200).json(entitlementPayload(doc));
