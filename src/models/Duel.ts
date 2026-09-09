@@ -22,7 +22,7 @@ const duelSchema = new Schema<IDuel>({
   fromUid: { type: String, required: true },
   toUid: { type: String, required: true },
   app: { type: String, required: true },
-  stake: { type: Number, default: 100 },
+  stake: { type: Number, default: 50 },
   status: { type: String, enum: ['pending', 'active', 'completed', 'declined', 'void', 'cancelled'], default: 'pending' },
 
   startAt: { type: Date, default: null },

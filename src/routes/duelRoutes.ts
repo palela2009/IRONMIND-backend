@@ -25,6 +25,7 @@ async function areFriends(a: string, b: string): Promise<boolean> {
 // guaranteed to exist. Paying out from a balance checked only at settlement would let a
 // loser spend their coins during the 24 hours and win the duel by being broke.
 async function refundAntes(duel: IDuel): Promise<void> {
+  if (duel.stake <= 0) return;
   await UserOnboarding.updateMany(
     { uid: { $in: [duel.fromUid, duel.toUid] } },
     { $inc: { coins: duel.stake } }
@@ -47,8 +48,11 @@ async function settleDuel(duel: IDuel): Promise<void> {
   duel.status = 'completed';
   await duel.save();
 
-  // Winner takes the whole pot: their own ante back plus the loser's.
-  await UserOnboarding.updateOne({ uid: winnerUid }, { $inc: { coins: duel.stake * 2 } });
+  // Winner takes the whole pot: their own ante back plus the loser's. A free duel has no
+  // pot, and is settled for the record and the bragging rights alone.
+  if (duel.stake > 0) {
+    await UserOnboarding.updateOne({ uid: winnerUid }, { $inc: { coins: duel.stake * 2 } });
+  }
 
   const loserUid = winnerUid === duel.fromUid ? duel.toUid : duel.fromUid;
   const [winner, loser] = await Promise.all([
@@ -56,7 +60,7 @@ async function settleDuel(duel: IDuel): Promise<void> {
     UserOnboarding.findOne({ uid: loserUid }),
   ]);
 
-  sendPush(winnerUid, 'Duel won', `You beat ${nameFor(loser)} on ${duel.app}. Pot: ${duel.stake * 2} coins.`, {
+  sendPush(winnerUid, 'Duel won', duel.stake > 0 ? `You beat ${nameFor(loser)} on ${duel.app}. Pot: ${duel.stake * 2} coins.` : `You beat ${nameFor(loser)} on ${duel.app}.`, {
     type: 'duel_result',
   });
   sendPush(loserUid, 'Duel lost', `${nameFor(winner)} spent less time on ${duel.app}.`, {
@@ -99,14 +103,19 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'You already have a duel running with them' });
     }
 
-    const ante = Number(stake) > 0 ? Number(stake) : 100;
+    // A zero stake is a deliberate choice - a duel played for pride alone - so it must be
+    // distinguished from stake being absent, which still defaults to the standard ante.
+    const requested = Number(stake);
+    const ante = Number.isFinite(requested) && requested >= 0 ? Math.round(requested) : 50;
 
     // Checked when the challenge is sent, not only when it is accepted. Letting someone send
     // a duel they cannot fund means the opponent accepts and the whole thing fails on their
     // side, which reads as the opponent's problem rather than the challenger's.
-    const me = await UserOnboarding.findOne({ uid });
-    if ((me?.coins ?? 0) < ante) {
-      return res.status(409).json({ message: `You need ${ante} coins to start this duel` });
+    if (ante > 0) {
+      const me = await UserOnboarding.findOne({ uid });
+      if ((me?.coins ?? 0) < ante) {
+        return res.status(409).json({ message: `You need ${ante} coins to start this duel` });
+      }
     }
 
     const duel = await Duel.create({
@@ -178,8 +187,9 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
     }
 
     // Take both antes atomically. If either player cannot cover it the duel does not start,
-    // and anything already taken is handed straight back.
-    const challenger = await UserOnboarding.findOneAndUpdate(
+    // and anything already taken is handed straight back. Skipped for a free duel, which
+    // has nothing to escrow.
+    const challenger = duel.stake <= 0 ? true : await UserOnboarding.findOneAndUpdate(
       { uid: duel.fromUid, coins: { $gte: duel.stake } },
       { $inc: { coins: -duel.stake } },
       { new: true }
@@ -191,7 +201,7 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
       return res.status(409).json({ message: 'They cannot cover the ante right now' });
     }
 
-    const opponent = await UserOnboarding.findOneAndUpdate(
+    const opponent = duel.stake <= 0 ? true : await UserOnboarding.findOneAndUpdate(
       { uid: duel.toUid, coins: { $gte: duel.stake } },
       { $inc: { coins: -duel.stake } },
       { new: true }
