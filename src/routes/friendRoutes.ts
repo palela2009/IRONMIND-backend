@@ -193,6 +193,8 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         currentXP: statsMap.get(fuid)?.currentXP ?? 0,
         isPro: isProActive(profileMap.get(fuid) ?? null),
         isOwner: isOwner(profileMap.get(fuid)?.email),
+        frame: profileMap.get(fuid)?.equippedFrame ?? null,
+        nameEffect: profileMap.get(fuid)?.equippedNameEffect ?? null,
       }))
       .sort((a, b) => b.currentStreak - a.currentStreak);
 

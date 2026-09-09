@@ -26,6 +26,11 @@ export interface IUserOnboarding extends Document {
   coinEarnDate: string | null;
   coinEarnedToday: number;
   unlockedThemes: string[];
+  ownedFrames: string[];
+  ownedNameEffects: string[];
+  equippedFrame: string | null;
+  equippedNameEffect: string | null;
+  proFromCoinsAt: Date | null;
   themeId: string;
   createdAt: Date;
 }
@@ -80,6 +85,15 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   coinEarnDate: { type: String, default: null },
   coinEarnedToday: { type: Number, default: 0 },
   unlockedThemes: { type: [String], default: [] },
+
+  ownedFrames: { type: [String], default: [] },
+  ownedNameEffects: { type: [String], default: [] },
+  equippedFrame: { type: String, default: null },
+  equippedNameEffect: { type: String, default: null },
+
+  // When Pro was last bought with coins. Enforces the once-a-month limit, which matters more
+  // than the price: without it a determined player farms coins forever and never subscribes.
+  proFromCoinsAt: { type: Date, default: null },
   themeId: { type: String, default: 'default' },
 
   createdAt: { type: Date, default: Date.now }
