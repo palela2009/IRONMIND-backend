@@ -17,6 +17,10 @@ const TRIAL_DAYS = 7;
 // of the 200 a streak freeze costs — the shop should still be earned rather than handed over.
 const STARTER_COINS = 150;
 
+// A one-off float for owner accounts, so every shop item and duel stake can be exercised
+// without grinding for them first.
+const OWNER_COINS = 10000;
+
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
   monthly: 30,
   annual: 365,
@@ -115,6 +119,15 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         { $inc: { coins: STARTER_COINS }, $set: { starterCoinsGrantedAt: new Date() } },
         { new: true }
       ) ?? doc;
+    }
+
+    if (doc && isOwner(doc.email) && !doc.ownerCoinsGrantedAt) {
+      doc = await UserOnboarding.findOneAndUpdate(
+        { uid: req.uid, ownerCoinsGrantedAt: null },
+        { $inc: { coins: OWNER_COINS }, $set: { ownerCoinsGrantedAt: new Date() } },
+        { new: true }
+      ) ?? doc;
+      console.log(`👑 [API]: Owner coin float granted to ${req.uid}`);
     }
 
     if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {

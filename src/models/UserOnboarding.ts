@@ -23,6 +23,7 @@ export interface IUserOnboarding extends Document {
   trialEndsAt: Date | null;
   coins: number;
   starterCoinsGrantedAt: Date | null;
+  ownerCoinsGrantedAt: Date | null;
   coinEarnDate: string | null;
   coinEarnedToday: number;
   unlockedThemes: string[];
@@ -82,6 +83,11 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   // until they had won ten challenges, so the whole duel feature was unreachable on a new
   // account. Recorded as a timestamp rather than a boolean so it cannot be re-granted.
   starterCoinsGrantedAt: { type: Date, default: null },
+
+  // Separate from the starter grant so an owner account still receives it once, even though
+  // it was created long before this existed. A timestamp rather than a boolean, so the grant
+  // cannot silently repeat on every entitlement read.
+  ownerCoinsGrantedAt: { type: Date, default: null },
   coinEarnDate: { type: String, default: null },
   coinEarnedToday: { type: Number, default: 0 },
   unlockedThemes: { type: [String], default: [] },
