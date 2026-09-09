@@ -3,6 +3,7 @@ import { UserOnboarding } from '../models/UserOnboarding';
 import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
 import { isProActive, isOwner } from './proRoutes';
+import { sendPush } from '../services/notifications';
 
 const router = Router();
 
@@ -72,6 +73,17 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
     if (reverseRequest) {
       reverseRequest.status = 'accepted';
       await reverseRequest.save();
+
+      // The other person invited first, so from their side this is their request being
+      // accepted - the same event, and worth the same notification.
+      const me = await UserOnboarding.findOne({ uid });
+      sendPush(
+        target.uid,
+        'Friend request accepted',
+        `${nameFor(me)} accepted your request. You are on each other's leaderboard now.`,
+        { type: 'friend_accepted' }
+      );
+
       return res.status(200).json({ message: 'Friend added', status: 'accepted' });
     }
 
@@ -119,6 +131,15 @@ router.post('/requests/:id/accept', async (req: Request, res: Response): Promise
     }
     request.status = 'accepted';
     await request.save();
+
+    const me = await UserOnboarding.findOne({ uid: req.uid });
+    sendPush(
+      request.fromUid,
+      'Friend request accepted',
+      `${nameFor(me)} accepted your request. You are on each other's leaderboard now.`,
+      { type: 'friend_accepted' }
+    );
+
     return res.status(200).json({ message: 'Friend request accepted' });
   } catch (error) {
     console.error('Error accepting request:', error);
