@@ -80,6 +80,10 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     streakFreezes: doc?.streakFreezes ?? 0,
     coins: doc?.coins ?? 0,
     unlockedThemes: doc?.unlockedThemes ?? [],
+    ownedFrames: doc?.ownedFrames ?? [],
+    ownedNameEffects: doc?.ownedNameEffects ?? [],
+    equippedFrame: doc?.equippedFrame ?? null,
+    equippedNameEffect: doc?.equippedNameEffect ?? null,
     themeId: doc?.themeId ?? 'default',
     // Eligible until the account explicitly closes it. A missing document counts as eligible
     // rather than ineligible: the document is only created during onboarding, so requiring one
