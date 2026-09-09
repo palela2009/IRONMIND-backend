@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Duel, IDuel } from '../models/Duel';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { FriendRequest } from '../models/FriendRequest';
+import { sendPush } from '../services/notifications';
 
 const router = Router();
 
@@ -48,6 +49,19 @@ async function settleDuel(duel: IDuel): Promise<void> {
 
   // Winner takes the whole pot: their own ante back plus the loser's.
   await UserOnboarding.updateOne({ uid: winnerUid }, { $inc: { coins: duel.stake * 2 } });
+
+  const loserUid = winnerUid === duel.fromUid ? duel.toUid : duel.fromUid;
+  const [winner, loser] = await Promise.all([
+    UserOnboarding.findOne({ uid: winnerUid }),
+    UserOnboarding.findOne({ uid: loserUid }),
+  ]);
+
+  sendPush(winnerUid, 'Duel won', `You beat ${nameFor(loser)} on ${duel.app}. Pot: ${duel.stake * 2} coins.`, {
+    type: 'duel_result',
+  });
+  sendPush(loserUid, 'Duel lost', `${nameFor(winner)} spent less time on ${duel.app}.`, {
+    type: 'duel_result',
+  });
 }
 
 async function settleExpiredFor(uid: string): Promise<void> {
@@ -192,6 +206,14 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
     duel.startAt = now;
     duel.endAt = new Date(now.getTime() + DUEL_DURATION_MS);
     await duel.save();
+
+    const accepter = await UserOnboarding.findOne({ uid: duel.toUid });
+    sendPush(
+      duel.fromUid,
+      'Duel accepted',
+      `${nameFor(accepter)} took your ${duel.app} duel. 24 hours starting now.`,
+      { type: 'duel_accepted', duelId: String(duel._id) }
+    );
 
     return res.status(200).json(duel);
   } catch (error) {

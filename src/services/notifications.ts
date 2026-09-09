@@ -71,3 +71,28 @@ async function checkReceipt(receiptId: string, userId: string): Promise<void> {
     console.error('❌ [Push]: Error checking receipt:', error);
   }
 }
+
+// Generic sender used by the event-driven notifications. Everything a push needs to be safe
+// is handled here — missing or malformed tokens are a normal state, not an error worth
+// failing a request over, so callers can fire these without guarding.
+export async function sendPush(
+  userId: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    const user = await UserOnboarding.findOne({ uid: userId });
+    if (!user?.pushToken || !Expo.isExpoPushToken(user.pushToken)) return;
+
+    const [ticket] = await expo.sendPushNotificationsAsync([
+      { to: user.pushToken, title, body, sound: 'default' as const, data },
+    ]);
+
+    if (ticket.status === 'error') {
+      console.error(`❌ [Push]: ${title} rejected for ${userId}:`, ticket.message);
+    }
+  } catch (error) {
+    console.error('❌ [Push]: Error sending push:', error);
+  }
+}
