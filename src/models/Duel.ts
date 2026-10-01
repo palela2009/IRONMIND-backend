@@ -14,6 +14,10 @@ export interface IDuel extends Document {
   toMinutes: number | null;
   fromReportedAt: Date | null;
   toReportedAt: Date | null;
+  fromReaction: string | null;
+  fromReactedAt: Date | null;
+  toReaction: string | null;
+  toReactedAt: Date | null;
   winnerUid: string | null;
   createdAt: Date;
 }
@@ -32,6 +36,11 @@ const duelSchema = new Schema<IDuel>({
   toMinutes: { type: Number, default: null },
   fromReportedAt: { type: Date, default: null },
   toReportedAt: { type: Date, default: null },
+
+  fromReaction: { type: String, default: null },
+  fromReactedAt: { type: Date, default: null },
+  toReaction: { type: String, default: null },
+  toReactedAt: { type: Date, default: null },
 
   winnerUid: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },

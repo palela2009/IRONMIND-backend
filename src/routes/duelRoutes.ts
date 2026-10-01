@@ -3,6 +3,7 @@ import { Duel, IDuel } from '../models/Duel';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { FriendRequest } from '../models/FriendRequest';
 import { sendPush } from '../services/notifications';
+import { DUEL_REACTIONS, REACTION_COOLDOWN_MS } from '../constants/reactions';
 
 const router = Router();
 
@@ -162,6 +163,9 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         myMinutes: isFrom ? d.fromMinutes : d.toMinutes,
         theirMinutes: isFrom ? d.toMinutes : d.fromMinutes,
         theirReportedAt: isFrom ? d.toReportedAt : d.fromReportedAt,
+        myReactedAt: isFrom ? d.fromReactedAt : d.toReactedAt,
+        theirReaction: isFrom ? d.toReaction : d.fromReaction,
+        theirReactedAt: isFrom ? d.toReactedAt : d.fromReactedAt,
         iWon: d.status === 'completed' ? d.winnerUid === uid : null,
         incoming: !isFrom,
       };
@@ -272,6 +276,54 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<any> => 
   } catch (error) {
     console.error('Error cancelling duel:', error);
     return res.status(500).json({ message: 'Server error while cancelling duel' });
+  }
+});
+
+router.post('/:id/react', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const uid = req.uid as string;
+    const reaction = String(req.body?.reaction ?? '');
+    const text = DUEL_REACTIONS[reaction];
+    if (!text) {
+      return res.status(400).json({ message: 'Unknown reaction' });
+    }
+
+    const duel = await Duel.findById(req.params.id);
+    if (!duel || (duel.fromUid !== uid && duel.toUid !== uid)) {
+      return res.status(404).json({ message: 'Duel not found' });
+    }
+    if (duel.status !== 'active') {
+      return res.status(400).json({ message: 'That duel is not running' });
+    }
+
+    // Every reaction is a push on the other player's phone, so a short cooldown is what stops
+    // four buttons from becoming a way to spam a friend with notifications.
+    const isFrom = duel.fromUid === uid;
+    const last = isFrom ? duel.fromReactedAt : duel.toReactedAt;
+    const now = new Date();
+    if (last && now.getTime() - last.getTime() < REACTION_COOLDOWN_MS) {
+      return res.status(429).json({ message: 'Give them a minute before the next one' });
+    }
+
+    if (isFrom) {
+      duel.fromReaction = reaction;
+      duel.fromReactedAt = now;
+    } else {
+      duel.toReaction = reaction;
+      duel.toReactedAt = now;
+    }
+    await duel.save();
+
+    const sender = await UserOnboarding.findOne({ uid });
+    sendPush(isFrom ? duel.toUid : duel.fromUid, nameFor(sender), `${text} · ${duel.app} duel`, {
+      type: 'duel_reaction',
+      duelId: String(duel._id),
+    });
+
+    return res.status(200).json({ message: 'Sent', reactedAt: now });
+  } catch (error) {
+    console.error('Error sending duel reaction:', error);
+    return res.status(500).json({ message: 'Server error while sending reaction' });
   }
 });
 
