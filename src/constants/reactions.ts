@@ -1,5 +1,3 @@
-// A fixed set rather than free text, so nothing a player sends can be abusive and nothing
-// needs moderating. The app keeps the same ids and renders its own copy of the text.
 export const DUEL_REACTIONS: Record<string, string> = {
   fire: '🔥 Nice streak',
   comeon: '💪 Come on',

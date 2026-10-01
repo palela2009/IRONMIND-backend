@@ -31,7 +31,6 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// Must be declared before '/:userId', which would otherwise capture "history" as a user id.
 router.get('/history', async (req: Request, res: Response): Promise<any> => {
   try {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);

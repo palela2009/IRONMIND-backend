@@ -72,9 +72,6 @@ async function checkReceipt(receiptId: string, userId: string): Promise<void> {
   }
 }
 
-// Generic sender used by the event-driven notifications. Everything a push needs to be safe
-// is handled here — missing or malformed tokens are a normal state, not an error worth
-// failing a request over, so callers can fire these without guarding.
 export async function sendPush(
   userId: string,
   title: string,

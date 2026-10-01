@@ -22,9 +22,6 @@ async function areFriends(a: string, b: string): Promise<boolean> {
   return !!link;
 }
 
-// Both antes are taken when a duel is accepted and held until it resolves, so the pot is
-// guaranteed to exist. Paying out from a balance checked only at settlement would let a
-// loser spend their coins during the 24 hours and win the duel by being broke.
 async function refundAntes(duel: IDuel): Promise<void> {
   if (duel.stake <= 0) return;
   await UserOnboarding.updateMany(
@@ -49,8 +46,6 @@ async function settleDuel(duel: IDuel): Promise<void> {
   duel.status = 'completed';
   await duel.save();
 
-  // Winner takes the whole pot: their own ante back plus the loser's. A free duel has no
-  // pot, and is settled for the record and the bragging rights alone.
   if (duel.stake > 0) {
     await UserOnboarding.updateOne({ uid: winnerUid }, { $inc: { coins: duel.stake * 2 } });
   }
@@ -104,14 +99,9 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'You already have a duel running with them' });
     }
 
-    // A zero stake is a deliberate choice - a duel played for pride alone - so it must be
-    // distinguished from stake being absent, which still defaults to the standard ante.
     const requested = Number(stake);
     const ante = Number.isFinite(requested) && requested >= 0 ? Math.round(requested) : 50;
 
-    // Checked when the challenge is sent, not only when it is accepted. Letting someone send
-    // a duel they cannot fund means the opponent accepts and the whole thing fails on their
-    // side, which reads as the opponent's problem rather than the challenger's.
     if (ante > 0) {
       const me = await UserOnboarding.findOne({ uid });
       if ((me?.coins ?? 0) < ante) {
@@ -184,24 +174,16 @@ router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => 
     if (!duel || duel.toUid !== req.uid) {
       return res.status(404).json({ message: 'Duel not found' });
     }
-    // Distinguished from "not found" deliberately: reporting a duel that plainly exists on
-    // screen as missing sends the user hunting for a bug that isn't there.
     if (duel.status !== 'pending') {
       return res.status(409).json({ message: `That duel is already ${duel.status}` });
     }
 
-    // Take both antes atomically. If either player cannot cover it the duel does not start,
-    // and anything already taken is handed straight back. Skipped for a free duel, which
-    // has nothing to escrow.
     const challenger = duel.stake <= 0 ? true : await UserOnboarding.findOneAndUpdate(
       { uid: duel.fromUid, coins: { $gte: duel.stake } },
       { $inc: { coins: -duel.stake } },
       { new: true }
     );
     if (!challenger) {
-      // The duel stays pending. Cancelling it over a temporary shortfall destroyed a duel
-      // the challenger could have funded a minute later, and the second attempt then failed
-      // as "not found" because the first attempt had already killed it.
       return res.status(409).json({ message: 'They cannot cover the ante right now' });
     }
 
@@ -269,7 +251,6 @@ router.post('/:id/cancel', async (req: Request, res: Response): Promise<any> => 
     duel.winnerUid = null;
     await duel.save();
 
-    // Only an accepted duel ever took the antes; a pending one has nothing to give back.
     if (wasActive) await refundAntes(duel);
 
     return res.status(200).json({ message: 'Duel cancelled' });
@@ -296,8 +277,6 @@ router.post('/:id/react', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'That duel is not running' });
     }
 
-    // Every reaction is a push on the other player's phone, so a short cooldown is what stops
-    // four buttons from becoming a way to spam a friend with notifications.
     const isFrom = duel.fromUid === uid;
     const last = isFrom ? duel.fromReactedAt : duel.toReactedAt;
     const now = new Date();

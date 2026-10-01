@@ -7,21 +7,14 @@ const router = Router();
 
 export type EarnReason = 'challenge_win' | 'perfect_day' | 'rewarded_ad';
 
-// The server owns these amounts. The client sends a reason, never a number, so a tampered
-// build cannot decide how much it is paid.
 const EARN_AMOUNTS: Record<EarnReason, number> = {
   challenge_win: 10,
   perfect_day: 50,
   rewarded_ad: 25,
 };
 
-// Pro earns at double rate. That, plus the monthly stipend, is what makes Pro a shortcut
-// rather than the only route to anything coins can buy.
 const PRO_MULTIPLIER = 2;
 
-// A daily ceiling on earnings. Challenge results are reported by the client and cannot be
-// verified server-side yet, so this caps what a replayed or forged report is worth rather
-// than pretending the reports are trustworthy.
 const DAILY_EARN_CAP = 500;
 
 export const SHOP_PRICES = {
@@ -123,8 +116,6 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
         return res.status(400).json({ message: 'You already own that' });
       }
       price = table[cosmeticId];
-      // Equipped on purchase. Buying something cosmetic and then having to find a second
-      // control to actually wear it is friction for no reason.
       update = {
         $inc: { coins: -price },
         $addToSet: { [ownedField]: cosmeticId },
@@ -134,8 +125,6 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
       if (isProActive(doc)) {
         return res.status(400).json({ message: 'You already have Pro' });
       }
-      // Once a calendar month. The cap is what stops coins replacing the subscription
-      // outright, and it matters more than the price does.
       const last = doc.proFromCoinsAt;
       if (last) {
         const now = new Date();
@@ -158,8 +147,6 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'Unknown item' });
     }
 
-    // Balance check and debit in one atomic update, so two purchases racing each other
-    // cannot both spend the same coins.
     const updated = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid, coins: { $gte: price } },
       update,
@@ -183,8 +170,6 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-// Equipping something already owned. Validated against ownership so a tampered client cannot
-// wear a frame it never bought.
 router.post('/equip', async (req: Request, res: Response): Promise<any> => {
   try {
     const { slot, cosmeticId } = req.body as { slot?: 'frame' | 'nameEffect'; cosmeticId?: string | null };

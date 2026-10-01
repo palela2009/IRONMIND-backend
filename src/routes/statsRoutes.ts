@@ -6,11 +6,6 @@ import { sendPush } from '../services/notifications';
 
 const router = Router();
 
-// Tells friends who have just been overtaken on the leaderboard.
-//
-// Only fires on the exact crossing - the previous streak was at or below theirs and the new
-// one is above - so a user who stays ahead does not re-notify the same friend on every
-// challenge they win. Friends still on zero are skipped: being passed at nothing is not news.
 async function notifyOvertakenFriends(uid: string, before: number, after: number): Promise<void> {
   if (after <= before) return;
 
@@ -40,7 +35,6 @@ async function notifyOvertakenFriends(uid: string, before: number, after: number
     }
   }
 }
-
 
 router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
   try {

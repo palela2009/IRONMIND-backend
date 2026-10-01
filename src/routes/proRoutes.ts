@@ -8,17 +8,10 @@ export type ProPlan = 'monthly' | 'annual' | 'lifetime';
 const PRO_MONTHLY_FREEZES = 20;
 const PRO_MONTHLY_COINS = 500;
 
-// Seven rather than three: Advanced Analytics is empty on day one and needs several days of
-// history before it shows anything, so a shorter trial has people judging the headline Pro
-// feature while it is still a blank chart.
 const TRIAL_DAYS = 7;
 
-// Enough to fund a duel ante on day one, so the feature is reachable immediately, but short
-// of the 200 a streak freeze costs — the shop should still be earned rather than handed over.
 const STARTER_COINS = 150;
 
-// A one-off float for owner accounts, so every shop item and duel stake can be exercised
-// without grinding for them first.
 const OWNER_COINS = 10000;
 
 const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
@@ -47,8 +40,6 @@ export function isProActive(
 ): boolean {
   if (!doc) return false;
   if (isOwner(doc.email)) return true;
-  // A live trial grants the full entitlement. Everything gated on Pro therefore works during
-  // the trial without any feature needing to know a trial exists.
   if (isTrialActive(doc)) return true;
   if (!doc.proPlan) return false;
   if (doc.proPlan === 'lifetime') return true;
@@ -66,8 +57,6 @@ async function refillFreezes(uid: string) {
     { uid },
     {
       $max: { streakFreezes: PRO_MONTHLY_FREEZES },
-      // The stipend is added rather than topped up to, so it stacks with coins the user
-      // earned themselves instead of quietly replacing them.
       $inc: { coins: PRO_MONTHLY_COINS },
       $set: { freezesRefilledAt: new Date() },
     },
@@ -89,13 +78,9 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     equippedFrame: doc?.equippedFrame ?? null,
     equippedNameEffect: doc?.equippedNameEffect ?? null,
     themeId: doc?.themeId ?? 'default',
-    // Eligible until the account explicitly closes it. A missing document counts as eligible
-    // rather than ineligible: the document is only created during onboarding, so requiring one
-    // meant the newest users - the entire audience for a welcome offer - never saw it.
     welcomeOffer: !doc?.welcomeOfferClosedAt && !isProActive(doc),
     onTrial: isTrialActive(doc),
     trialEndsAt: doc?.trialEndsAt ?? null,
-    // Offered only to an account that has never started one, so a lapsed trial cannot restart.
     trialAvailable: !doc?.trialStartedAt && !doc?.proPlan,
   };
 }
@@ -225,10 +210,6 @@ router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> =
   }
 });
 
-// POST /api/pro/trial/start — begins the one-time free trial.
-//
-// Guarded on trialStartedAt being unset, atomically, so repeated taps or a retry cannot
-// extend an existing trial.
 router.post('/trial/start', async (req: Request, res: Response): Promise<any> => {
   try {
     const now = new Date();

@@ -74,8 +74,6 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
       reverseRequest.status = 'accepted';
       await reverseRequest.save();
 
-      // The other person invited first, so from their side this is their request being
-      // accepted - the same event, and worth the same notification.
       const me = await UserOnboarding.findOne({ uid });
       sendPush(
         target.uid,
