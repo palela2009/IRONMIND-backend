@@ -1,9 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding, IUserOnboarding } from '../models/UserOnboarding';
+import { syncStorePurchase, revenueCatConfigured } from '../services/revenuecat';
 
 const router = Router();
-
-export type ProPlan = 'monthly' | 'annual' | 'lifetime';
 
 const PRO_MONTHLY_FREEZES = 20;
 const PRO_MONTHLY_COINS = 500;
@@ -13,12 +12,6 @@ const TRIAL_DAYS = 7;
 const STARTER_COINS = 150;
 
 const OWNER_COINS = 10000;
-
-const PLAN_DURATION_DAYS: Record<ProPlan, number | null> = {
-  monthly: 30,
-  annual: 365,
-  lifetime: null, 
-};
 
 const ownerEmails = (): string[] =>
   (process.env.OWNER_EMAILS ?? '')
@@ -69,6 +62,7 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     isPro: isProActive(doc),
     isOwner: isOwner(doc?.email),
     plan: doc?.proPlan ?? null,
+    source: doc?.proSource ?? null,
     expiresAt: doc?.proExpiresAt ?? null,
     streakFreezes: doc?.streakFreezes ?? 0,
     coins: doc?.coins ?? 0,
@@ -89,10 +83,10 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
     let doc = await UserOnboarding.findOne({ uid: req.uid });
 
-    if (doc && isOwner(doc.email) && doc.proPlan !== 'lifetime') {
+    if (doc && isOwner(doc.email) && (doc.proPlan !== 'lifetime' || doc.proSource !== 'owner')) {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid },
-        { $set: { proPlan: 'lifetime', proExpiresAt: null } },
+        { $set: { proPlan: 'lifetime', proExpiresAt: null, proSource: 'owner' } },
         { new: true }
       );
       console.log(`👑 [API]: Owner Pro granted to ${req.uid}`);
@@ -115,6 +109,10 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       console.log(`👑 [API]: Owner coin float granted to ${req.uid}`);
     }
 
+    if (doc?.proSource === 'store' && !isProActive(doc) && revenueCatConfigured()) {
+      doc = await syncStorePurchase(req.uid as string).catch(() => doc);
+    }
+
     if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {
       doc = await refillFreezes(req.uid as string);
       console.log(`❄ [API]: Monthly freezes refilled for ${req.uid}`);
@@ -127,53 +125,14 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/activate', async (req: Request, res: Response): Promise<any> => {
+router.post('/sync', async (req: Request, res: Response): Promise<any> => {
   try {
-    if (process.env.ALLOW_DEV_PRO !== 'true') {
-      return res.status(403).json({ message: 'Purchases are not available yet' });
-    }
-
-    const { plan } = req.body as { plan?: ProPlan };
-    if (!plan || !(plan in PLAN_DURATION_DAYS)) {
-      return res.status(400).json({ message: 'plan must be monthly, annual or lifetime' });
-    }
-
-    const days = PLAN_DURATION_DAYS[plan];
-    const expiresAt = days === null ? null : new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-
-    await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid },
-      {
-        $set: { proPlan: plan, proExpiresAt: expiresAt },
-        $max: { streakFreezes: PRO_MONTHLY_FREEZES },
-        $currentDate: { freezesRefilledAt: true },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
-    const doc = await UserOnboarding.findOne({ uid: req.uid });
-
-    console.log(`⭐ [API]: Pro activated (${plan}) for user: ${req.uid}`);
+    const doc = await syncStorePurchase(req.uid as string);
+    if (doc?.proSource === 'store') console.log(`⭐ [API]: Store Pro synced (${doc.proPlan}) for ${req.uid}`);
     return res.status(200).json(entitlementPayload(doc));
   } catch (error) {
-    console.error('Error activating Pro:', error);
-    return res.status(500).json({ message: 'Server error while activating Pro' });
-  }
-});
-
-router.post('/cancel', async (req: Request, res: Response): Promise<any> => {
-  try {
-    if (process.env.ALLOW_DEV_PRO !== 'true') {
-      return res.status(403).json({ message: 'Not available' });
-    }
-    const doc = await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid },
-      { $set: { proPlan: null, proExpiresAt: null } },
-      { new: true }
-    );
-    return res.status(200).json(entitlementPayload(doc));
-  } catch (error) {
-    console.error('Error cancelling Pro:', error);
-    return res.status(500).json({ message: 'Server error while cancelling Pro' });
+    console.error('Error syncing purchase:', error);
+    return res.status(502).json({ message: 'Could not confirm the purchase yet, try again in a moment' });
   }
 });
 

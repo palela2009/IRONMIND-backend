@@ -16,6 +16,7 @@ export interface IUserOnboarding extends Document {
   inviteCode?: string;
   proPlan: 'monthly' | 'annual' | 'lifetime' | null;
   proExpiresAt: Date | null;
+  proSource: 'store' | 'coins' | 'owner' | null;
   streakFreezes: number;
   freezesRefilledAt: Date | null;
   welcomeOfferClosedAt: Date | null;
@@ -57,6 +58,7 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
 
   proPlan: { type: String, enum: ['monthly', 'annual', 'lifetime', null], default: null },
   proExpiresAt: { type: Date, default: null },
+  proSource: { type: String, enum: ['store', 'coins', 'owner', null], default: null },
 
   streakFreezes: { type: Number, default: 0 },
   freezesRefilledAt: { type: Date, default: null },

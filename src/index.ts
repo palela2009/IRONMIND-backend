@@ -12,6 +12,7 @@ import duelRoutes from './routes/duelRoutes';
 import proRoutes from './routes/proRoutes';
 import coinRoutes from './routes/coinRoutes';
 import publicRoutes from './routes/publicRoutes';
+import revenuecatRoutes from './routes/revenuecatRoutes';
 import { verifyAuth } from './middleware/verifyAuth';
 
 dotenv.config();
@@ -36,6 +37,7 @@ mongoose
 
 
 app.use('/api/public', publicRoutes);
+app.use('/api/revenuecat', revenuecatRoutes);
 
 app.use('/api/stats', verifyAuth, statsRoutes);
 app.use('/api/user', verifyAuth, userRoutes);

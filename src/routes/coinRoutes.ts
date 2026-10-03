@@ -141,6 +141,7 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
           proPlan: 'monthly',
           proExpiresAt: new Date(Date.now() + PRO_WEEK_DAYS * 24 * 60 * 60 * 1000),
           proFromCoinsAt: new Date(),
+          proSource: 'coins',
         },
       };
     } else {
