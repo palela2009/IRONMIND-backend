@@ -18,8 +18,8 @@ const PRO_MULTIPLIER = 2;
 const DAILY_EARN_CAP = 500;
 
 export const SHOP_PRICES = {
-  freeze: 200,
-  theme: 750,
+  freeze: 100,
+  theme: 300,
 };
 
 const todayKey = (): string => new Date().toISOString().slice(0, 10);

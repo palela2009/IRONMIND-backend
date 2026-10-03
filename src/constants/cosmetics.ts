@@ -1,19 +1,19 @@
 export const FRAME_PRICES: Record<string, number> = {
-  bronze: 150,
-  steel: 250,
-  gold: 400,
-  neon: 600,
-  galaxy: 900,
-  mythic: 1500,
+  bronze: 50,
+  steel: 100,
+  gold: 150,
+  neon: 250,
+  galaxy: 400,
+  mythic: 600,
 };
 
 export const NAME_EFFECT_PRICES: Record<string, number> = {
-  gold: 300,
-  crimson: 300,
-  ice: 400,
-  toxic: 500,
-  void: 700,
+  gold: 100,
+  crimson: 100,
+  ice: 150,
+  toxic: 200,
+  void: 300,
 };
 
-export const PRO_WEEK_PRICE = 2000;
+export const PRO_WEEK_PRICE = 1000;
 export const PRO_WEEK_DAYS = 7;
