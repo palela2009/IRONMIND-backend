@@ -16,7 +16,10 @@ export interface IUserOnboarding extends Document {
   inviteCode?: string;
   proPlan: 'monthly' | 'annual' | 'lifetime' | null;
   proExpiresAt: Date | null;
-  proSource: 'store' | 'coins' | 'owner' | null;
+  proSource: 'store' | 'coins' | 'owner' | 'invites' | null;
+  referredBy: string | null;
+  referralActivatedAt: Date | null;
+  referralRewards: number[];
   streakFreezes: number;
   freezesRefilledAt: Date | null;
   welcomeOfferClosedAt: Date | null;
@@ -58,7 +61,10 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
 
   proPlan: { type: String, enum: ['monthly', 'annual', 'lifetime', null], default: null },
   proExpiresAt: { type: Date, default: null },
-  proSource: { type: String, enum: ['store', 'coins', 'owner', null], default: null },
+  proSource: { type: String, enum: ['store', 'coins', 'owner', 'invites', null], default: null },
+  referredBy: { type: String, default: null, index: true },
+  referralActivatedAt: { type: Date, default: null },
+  referralRewards: { type: [Number], default: [] },
 
   streakFreezes: { type: Number, default: 0 },
   freezesRefilledAt: { type: Date, default: null },

@@ -7,7 +7,6 @@ const router = Router();
 const PRO_MONTHLY_FREEZES = 20;
 const PRO_MONTHLY_COINS = 500;
 
-const TRIAL_DAYS = 7;
 
 const STARTER_COINS = 150;
 
@@ -75,7 +74,6 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     welcomeOffer: !doc?.welcomeOfferClosedAt && !isProActive(doc),
     onTrial: isTrialActive(doc),
     trialEndsAt: doc?.trialEndsAt ?? null,
-    trialAvailable: !doc?.trialStartedAt && !doc?.proPlan,
   };
 }
 
@@ -166,33 +164,6 @@ router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> =
   } catch (error) {
     console.error('Error granting freeze:', error);
     return res.status(500).json({ message: 'Server error while granting freeze' });
-  }
-});
-
-router.post('/trial/start', async (req: Request, res: Response): Promise<any> => {
-  try {
-    const now = new Date();
-    const doc = await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid, trialStartedAt: null, proPlan: null },
-      {
-        $set: {
-          trialStartedAt: now,
-          trialEndsAt: new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
-          welcomeOfferClosedAt: now,
-        },
-      },
-      { new: true }
-    );
-
-    if (!doc) {
-      return res.status(409).json({ message: 'Trial already used' });
-    }
-
-    console.log(`🎁 [API]: Trial started for ${req.uid}`);
-    return res.status(200).json(entitlementPayload(doc));
-  } catch (error) {
-    console.error('Error starting trial:', error);
-    return res.status(500).json({ message: 'Server error while starting trial' });
   }
 });
 

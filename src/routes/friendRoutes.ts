@@ -4,6 +4,7 @@ import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
 import { isProActive, isOwner } from './proRoutes';
 import { sendPush } from '../services/notifications';
+import { attributeReferral, referralProgress } from '../services/referrals';
 
 const router = Router();
 
@@ -47,6 +48,15 @@ router.get('/code', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
+router.get('/invites', async (req: Request, res: Response): Promise<any> => {
+  try {
+    return res.status(200).json(await referralProgress(req.uid as string));
+  } catch (error) {
+    console.error('Error getting invite progress:', error);
+    return res.status(500).json({ message: 'Server error while getting invite progress' });
+  }
+});
+
 router.post('/add', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
@@ -60,6 +70,8 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
     if (target.uid === uid) {
       return res.status(400).json({ message: "That's your own code" });
     }
+
+    await attributeReferral(uid as string, target.uid);
 
     const existingAccepted = await FriendRequest.findOne({
       status: 'accepted',
