@@ -19,6 +19,7 @@ const DAILY_EARN_CAP = 500;
 
 export const SHOP_PRICES = {
   freeze: 100,
+  reclaim: 200,
   theme: 300,
 };
 
@@ -83,7 +84,7 @@ router.post('/award', async (req: Request, res: Response): Promise<any> => {
 router.post('/buy', async (req: Request, res: Response): Promise<any> => {
   try {
     const { item, themeId, cosmeticId } = req.body as {
-      item?: 'freeze' | 'theme' | 'frame' | 'nameEffect' | 'proWeek';
+      item?: 'freeze' | 'reclaim' | 'theme' | 'frame' | 'nameEffect' | 'proWeek';
       themeId?: string;
       cosmeticId?: string;
     };
@@ -97,6 +98,9 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
     if (item === 'freeze') {
       price = SHOP_PRICES.freeze;
       update = { $inc: { coins: -price, streakFreezes: 1 } };
+    } else if (item === 'reclaim') {
+      price = SHOP_PRICES.reclaim;
+      update = { $inc: { coins: -price } };
     } else if (item === 'theme') {
       if (!themeId) return res.status(400).json({ message: 'themeId is required' });
       if (doc.unlockedThemes?.includes(themeId)) {
