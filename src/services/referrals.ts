@@ -1,5 +1,5 @@
 import { UserOnboarding, IUserOnboarding } from '../models/UserOnboarding';
-import { isProActive } from '../routes/proRoutes';
+import { isProActive, isOwner } from '../routes/proRoutes';
 import { sendPush } from './notifications';
 
 export const REFERRAL_MILESTONES = [
@@ -16,24 +16,25 @@ const nameFor = (doc?: { displayName?: string; email?: string } | null) =>
   doc?.displayName || doc?.email?.split('@')[0] || 'A friend';
 
 export async function attributeReferral(newUid: string, inviterUid: string, deviceHash: string | null): Promise<boolean> {
-  if (!deviceHash) return false;
-
   const inviter = await UserOnboarding.findOne({ uid: inviterUid });
-  if (!inviter || inviter.deviceIds?.includes(deviceHash)) return false;
+  if (!inviter) return false;
 
-  const deviceAlreadyUsed = await UserOnboarding.exists({
-    uid: { $ne: newUid },
-    referredBy: { $ne: null },
-    deviceIds: deviceHash,
-  });
-  if (deviceAlreadyUsed) return false;
+  if (!isOwner(inviter.email)) {
+    if (!deviceHash || inviter.deviceIds?.includes(deviceHash)) return false;
+    const deviceAlreadyUsed = await UserOnboarding.exists({
+      uid: { $ne: newUid },
+      referredBy: { $ne: null },
+      deviceIds: deviceHash,
+    });
+    if (deviceAlreadyUsed) return false;
+  }
 
   const since = new Date(Date.now() - REFERRAL_WINDOW_DAYS * DAY_MS);
   const joined = await UserOnboarding.findOneAndUpdate(
     { uid: newUid, referredBy: null, createdAt: { $gte: since } },
     {
       $set: { referredBy: inviterUid, referralActivatedAt: new Date() },
-      $addToSet: { deviceIds: deviceHash },
+      ...(deviceHash ? { $addToSet: { deviceIds: deviceHash } } : {}),
     },
     { new: true }
   );
