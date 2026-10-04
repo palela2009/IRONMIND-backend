@@ -63,6 +63,7 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     isOwner: isOwner(doc?.email),
     plan: doc?.proPlan ?? null,
     source: doc?.proSource ?? null,
+    referralRewards: doc?.referralRewards ?? [],
     expiresAt: doc?.proExpiresAt ?? null,
     streakFreezes: doc?.streakFreezes ?? 0,
     coins: doc?.coins ?? 0,

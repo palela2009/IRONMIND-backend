@@ -20,7 +20,7 @@ const DAILY_EARN_CAP = 500;
 export const SHOP_PRICES = {
   freeze: 100,
   reclaim: 200,
-  theme: 300,
+  theme: 200,
 };
 
 const todayKey = (): string => new Date().toISOString().slice(0, 10);
