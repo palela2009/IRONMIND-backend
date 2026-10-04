@@ -5,6 +5,7 @@ import { FriendRequest } from '../models/FriendRequest';
 import { isProActive, isOwner } from './proRoutes';
 import { sendPush } from '../services/notifications';
 import { attributeReferral, referralProgress } from '../services/referrals';
+import { deviceHashFor, rememberDevice } from '../services/device';
 
 const router = Router();
 
@@ -71,7 +72,9 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: "That's your own code" });
     }
 
-    await attributeReferral(uid as string, target.uid);
+    const device = deviceHashFor(req);
+    await rememberDevice(uid as string, device);
+    await attributeReferral(uid as string, target.uid, device);
 
     const existingAccepted = await FriendRequest.findOne({
       status: 'accepted',

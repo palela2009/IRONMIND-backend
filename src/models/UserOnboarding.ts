@@ -20,6 +20,7 @@ export interface IUserOnboarding extends Document {
   referredBy: string | null;
   referralActivatedAt: Date | null;
   referralRewards: number[];
+  deviceIds: string[];
   streakFreezes: number;
   freezesRefilledAt: Date | null;
   welcomeOfferClosedAt: Date | null;
@@ -65,6 +66,7 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   referredBy: { type: String, default: null, index: true },
   referralActivatedAt: { type: Date, default: null },
   referralRewards: { type: [Number], default: [] },
+  deviceIds: { type: [String], default: [], index: true },
 
   streakFreezes: { type: Number, default: 0 },
   freezesRefilledAt: { type: Date, default: null },

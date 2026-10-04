@@ -1,8 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { ChallengeResult } from '../models/ChallengeResult';
 import { sendChallengeNotification } from '../services/notifications';
-import { checkReferralActivation } from '../services/referrals';
-
 const router = Router();
 
 router.post('/notify', async (req: Request, res: Response): Promise<any> => {
@@ -52,7 +50,6 @@ router.post('/result', async (req: Request, res: Response): Promise<any> => {
     const result = await ChallengeResult.create({ userId, targetApp, elapsedTime, wasSuccessful, timestamp });
 
     console.log(`📲 [API]: Challenge result saved for user: ${userId} | app: ${targetApp} | success: ${wasSuccessful}`);
-    checkReferralActivation(userId as string).catch((err) => console.error('Referral check failed:', err));
 
     return res.status(201).json(result);
   } catch (error) {

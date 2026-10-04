@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding, IUserOnboarding } from '../models/UserOnboarding';
 import { syncStorePurchase, revenueCatConfigured } from '../services/revenuecat';
+import { deviceHashFor, rememberDevice } from '../services/device';
 
 const router = Router();
 
@@ -79,6 +80,7 @@ function entitlementPayload(doc: IUserOnboarding | null) {
 
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
+    await rememberDevice(req.uid as string, deviceHashFor(req));
     let doc = await UserOnboarding.findOne({ uid: req.uid });
 
     if (doc && isOwner(doc.email) && (doc.proPlan !== 'lifetime' || doc.proSource !== 'owner')) {
