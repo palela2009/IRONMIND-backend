@@ -5,6 +5,7 @@ export const FRAME_PRICES: Record<string, number> = {
   neon: 150,
   galaxy: 250,
   mythic: 400,
+  galactic: 3000,
 };
 
 export const NAME_EFFECT_PRICES: Record<string, number> = {
