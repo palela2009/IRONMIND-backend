@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
+import { ScreenTime } from '../models/ScreenTime';
 import { isProActive, isOwner } from './proRoutes';
 import { sendPush } from '../services/notifications';
 import { attributeReferral, referralProgress } from '../services/referrals';
@@ -18,6 +19,17 @@ function generateCode(length = 6): string {
   }
   return code;
 }
+
+const isDateKey = (v: unknown): boolean => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+const shiftDateKey = (key: string, days: number): string => {
+  const d = new Date(`${key}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+const trackedMinutes = (apps: { app: string; minutes: number }[], tracked: string[]): number =>
+  apps.filter((a) => tracked.includes(a.app)).reduce((sum, a) => sum + a.minutes, 0);
 
 function nameFor(profile?: { displayName?: string; email?: string } | null): string {
   return profile?.displayName || profile?.email || 'Unknown';
@@ -185,15 +197,33 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     const friendUids = accepted.map((r) => (r.fromUid === uid ? r.toUid : r.fromUid));
     if (friendUids.length === 0) return res.status(200).json([]);
 
-    const [profiles, stats] = await Promise.all([
+    const today = isDateKey(req.query.date) ? (req.query.date as string) : new Date().toISOString().slice(0, 10);
+    const weekStart = shiftDateKey(today, -6);
+
+    const [profiles, stats, screen] = await Promise.all([
       UserOnboarding.find({ uid: { $in: friendUids } }),
       UserStats.find({ userId: { $in: friendUids } }),
+      ScreenTime.find({ userId: { $in: friendUids }, date: { $gte: weekStart, $lte: today } }),
     ]);
     const profileMap = new Map(profiles.map((p) => [p.uid, p]));
     const statsMap = new Map(stats.map((s) => [s.userId, s]));
 
+    const usageFor = (fuid: string) => {
+      const tracked = profileMap.get(fuid)?.targetApps ?? [];
+      const days = screen.filter((r) => r.userId === fuid);
+      const minutesOn = (date: string) =>
+        trackedMinutes(days.find((r) => r.date === date)?.apps ?? [], tracked);
+      const withData = days.map((r) => trackedMinutes(r.apps, tracked));
+      return {
+        trackedApps: tracked,
+        todayMinutes: minutesOn(today),
+        weekAvgMinutes: withData.length ? withData.reduce((a, b) => a + b, 0) / withData.length : 0,
+      };
+    };
+
     const result = friendUids
       .map((fuid) => ({
+        ...usageFor(fuid),
         uid: fuid,
         displayName: nameFor(profileMap.get(fuid)),
         photoURL: profileMap.get(fuid)?.photoURL ?? null,
@@ -209,7 +239,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         frame: profileMap.get(fuid)?.equippedFrame ?? null,
         nameEffect: profileMap.get(fuid)?.equippedNameEffect ?? null,
       }))
-      .sort((a, b) => b.currentStreak - a.currentStreak);
+      .sort((a, b) => a.todayMinutes - b.todayMinutes);
 
     return res.status(200).json(result);
   } catch (error) {

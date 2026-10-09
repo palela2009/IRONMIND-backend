@@ -6,6 +6,7 @@ export interface IDuel extends Document {
   fromUid: string;
   toUid: string;
   app: string;
+  apps: string[];
   stake: number;
   status: DuelStatus;
   startAt: Date | null;
@@ -26,6 +27,7 @@ const duelSchema = new Schema<IDuel>({
   fromUid: { type: String, required: true },
   toUid: { type: String, required: true },
   app: { type: String, required: true },
+  apps: { type: [String], default: [] },
   stake: { type: Number, default: 50 },
   status: { type: String, enum: ['pending', 'active', 'completed', 'declined', 'void', 'cancelled'], default: 'pending' },
 

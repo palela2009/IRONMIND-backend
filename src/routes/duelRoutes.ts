@@ -79,10 +79,16 @@ async function settleExpiredFor(uid: string): Promise<void> {
 router.post('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid as string;
-    const { toUid, app, stake } = req.body;
+    const { toUid, app, apps, stake } = req.body;
+    const appList: string[] = Array.from(
+      new Set((Array.isArray(apps) ? apps : app ? [app] : []).map((a: unknown) => String(a).trim()).filter(Boolean))
+    );
 
-    if (!toUid || !app) {
-      return res.status(400).json({ message: 'toUid and app are required' });
+    if (!toUid || appList.length === 0) {
+      return res.status(400).json({ message: 'toUid and at least one app are required' });
+    }
+    if (appList.length > 5) {
+      return res.status(400).json({ message: 'A duel can cover at most 5 apps' });
     }
     if (toUid === uid) {
       return res.status(400).json({ message: "You can't duel yourself" });
@@ -112,7 +118,8 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
     const duel = await Duel.create({
       fromUid: uid,
       toUid,
-      app: String(app),
+      app: appList.join(' + '),
+      apps: appList,
       stake: ante,
       status: 'pending',
     });
@@ -143,6 +150,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       return {
         id: d._id,
         app: d.app,
+        apps: d.apps?.length ? d.apps : [d.app],
         stake: d.stake,
         status: d.status,
         startAt: d.startAt,
