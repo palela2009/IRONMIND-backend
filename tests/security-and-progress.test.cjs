@@ -7,14 +7,20 @@ const { UserStats } = require('../dist/models/UserStats');
 const { ChallengeResult } = require('../dist/models/ChallengeResult');
 const { ChallengeDay } = require('../dist/models/ChallengeDay');
 const { Duel } = require('../dist/models/Duel');
+const { ShopPurchase } = require('../dist/models/ShopPurchase');
+const { PRO_WEEK_PRICE } = require('../dist/constants/cosmetics');
+const { challengeDay } = require('../dist/services/challengeTime');
 const { recordResult, reclaimResult } = require('../dist/services/challenges');
 const { acceptDuel, cancelDuel, settleDuel } = require('../dist/services/duelTransactions');
 const { verifiedEmailFrom, isOwner } = require('../dist/services/identity');
 const { isProActive } = require('../dist/routes/proRoutes');
 const express = require('express');
 let claims = { uid: 'a', email: 'user@example.com', email_verified: true };
+let deleteFailure = false;
+let revoked = false;
+const deletedUsers = new Set();
 const adminPath = require.resolve('../dist/config/firebaseAdmin');
-require.cache[adminPath] = { id: adminPath, filename: adminPath, loaded: true, exports: { __esModule: true, default: { auth: () => ({ verifyIdToken: async () => claims }) } } };
+require.cache[adminPath] = { id: adminPath, filename: adminPath, loaded: true, exports: { __esModule: true, default: { auth: () => ({ verifyIdToken: async (_token, checkRevoked) => { if (checkRevoked && revoked) throw Object.assign(new Error('Revoked'), { code: 'auth/id-token-revoked' }); if (checkRevoked && deletedUsers.has(claims.uid)) throw Object.assign(new Error('Deleted user'), { code: 'auth/user-not-found' }); return claims; }, deleteUser: async (uid) => { if (deleteFailure) throw new Error('Temporary Firebase failure'); if (deletedUsers.has(uid)) throw Object.assign(new Error('Not found'), { code: 'auth/user-not-found' }); deletedUsers.add(uid); } }) } } };
 const { verifyAuth } = require('../dist/middleware/verifyAuth');
 const userRoutes = require('../dist/routes/userRoutes').default;
 const proRoutes = require('../dist/routes/proRoutes').default;
@@ -26,7 +32,7 @@ let origin;
 before(async () => {
   db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, binary: { version: '7.0.24' } });
   await mongoose.connect(db.getUri());
-  await Promise.all([UserOnboarding.init(), UserStats.init(), ChallengeResult.init(), ChallengeDay.init(), Duel.init()]);
+  await Promise.all([UserOnboarding.init(), UserStats.init(), ChallengeResult.init(), ChallengeDay.init(), Duel.init(), ShopPurchase.init()]);
   const app = express();
   app.use(express.json());
   app.use('/user', verifyAuth, userRoutes);
@@ -37,9 +43,9 @@ before(async () => {
   origin = `http://127.0.0.1:${server.address().port}`;
 });
 after(async () => { if (server) await new Promise((resolve) => server.close(resolve)); await mongoose.disconnect(); if (db) await db.stop(); });
-beforeEach(async () => { await Promise.all([UserOnboarding.deleteMany({}), UserStats.deleteMany({}), ChallengeResult.deleteMany({}), ChallengeDay.deleteMany({}), Duel.deleteMany({})]); });
+beforeEach(async () => { deleteFailure = false; revoked = false; deletedUsers.clear(); claims = { uid: 'a', email: 'user@example.com', email_verified: true }; await Promise.all([UserOnboarding.deleteMany({}), UserStats.deleteMany({}), ChallengeResult.deleteMany({}), ChallengeDay.deleteMany({}), Duel.deleteMany({}), ShopPurchase.deleteMany({})]); });
 
-const account = (uid, extra = {}) => UserOnboarding.create({ uid, createdAt: new Date(Date.now() - 86400000 * 30), ...extra });
+const account = (uid, extra = {}) => UserOnboarding.create({ uid, targetApps: ['YouTube'], createdAt: new Date(Date.now() - 86400000 * 30), ...extra });
 const result = (index, success = true) => ({ eventId: `event_${String(index).padStart(8, '0')}`, targetApp: 'YouTube', elapsedTime: success ? 2 : 20, wasSuccessful: success, timestamp: Date.now() - 3600000 + index * 1000 });
 const request = (path, body, method = 'POST') => fetch(origin + path, { method, headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
 
@@ -153,4 +159,114 @@ test('missing final usage refunds once after the grace period', async () => {
   await Promise.all(Array.from({ length: 8 }, () => settleDuel(String(duel._id))));
   assert.equal((await Duel.findById(duel._id)).status, 'void');
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 500);
+});
+
+test('concurrent cosmetic purchases debit once even with different request IDs', async () => {
+  await account('a', { coins: 1000 });
+  const responses = await Promise.all(Array.from({ length: 8 }, (_, i) => request('/coins/buy', { item: 'theme', themeId: 'ice', requestId: `purchase_theme_${i}` })));
+  assert.ok(responses.every((res) => res.status === 200));
+  const profile = await UserOnboarding.findOne({ uid: 'a' });
+  assert.equal(profile.coins, 800);
+  assert.deepEqual([...profile.unlockedThemes], ['ice']);
+});
+
+test('consumable retries reuse a receipt and reject reuse for another item', async () => {
+  await account('a', { coins: 1000 });
+  const body = { item: 'freeze', requestId: 'same_purchase_123' };
+  await Promise.all(Array.from({ length: 8 }, () => request('/coins/buy', body)));
+  assert.equal((await request('/coins/buy', body)).status, 200);
+  assert.equal((await request('/coins/buy', { ...body, item: 'theme', themeId: 'ice' })).status, 409);
+  const profile = await UserOnboarding.findOne({ uid: 'a' });
+  assert.equal(profile.coins, 900);
+  assert.equal(profile.streakFreezes, 1);
+  assert.equal(await ShopPurchase.countDocuments(), 1);
+});
+
+test('concurrent monthly Pro purchases debit once', async () => {
+  await account('a', { coins: 10000 });
+  await Promise.all(Array.from({ length: 8 }, (_, i) => request('/coins/buy', { item: 'proWeek', requestId: `purchase_pro_${i}` })));
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 10000 - PRO_WEEK_PRICE);
+  assert.equal(await ShopPurchase.countDocuments(), 1);
+});
+
+test('account deletion refunds opponents once and removes daily and purchase data', async () => {
+  await account('a', { coins: 400 }); await account('b', { coins: 400 });
+  await Duel.create({ fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100, status: 'active', startAt: new Date(), endAt: new Date(Date.now() + 86400000) });
+  await ChallengeDay.create({ _id: 'a:day', userId: 'a', limit: 5 });
+  await ShopPurchase.create({ _id: 'a:receipt', userId: 'a', fingerprint: 'test' });
+  const responses = await Promise.all(Array.from({ length: 6 }, () => request('/user/account', null, 'DELETE')));
+  assert.ok(responses.every((res) => res.status === 200));
+  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 500);
+  assert.equal(await UserOnboarding.countDocuments({ uid: 'a' }), 0);
+  assert.equal(await ChallengeDay.countDocuments({ userId: 'a' }), 0);
+  assert.equal(await ShopPurchase.countDocuments({ userId: 'a' }), 0);
+  assert.equal(await Duel.countDocuments(), 0);
+});
+
+test('Firebase deletion failure stays retryable without another refund', async () => {
+  await account('a'); await account('b', { coins: 400 });
+  await Duel.create({ fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100, status: 'active' });
+  deleteFailure = true;
+  assert.equal((await request('/user/account', null, 'DELETE')).status, 503);
+  assert.equal((await request('/pro', null, 'GET')).status, 409);
+  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 500);
+  deleteFailure = false;
+  assert.equal((await request('/user/account', null, 'DELETE')).status, 200);
+  assert.equal((await request('/user/account', null, 'DELETE')).status, 200);
+  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 500);
+});
+
+test('acceptance racing account deletion cannot strand an opponent entry fee', async () => {
+  await account('a', { coins: 500 }); await account('b', { coins: 500 });
+  const duel = await Duel.create({ fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100 });
+  await Promise.allSettled([acceptDuel(String(duel._id), 'b'), request('/user/account', null, 'DELETE')]);
+  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 500);
+  assert.equal(await Duel.countDocuments(), 0);
+});
+
+test('account-local midnight starts a new allowance before UTC midnight', async () => {
+  await account('a', { dailyChallengeLimit: 3, challengeTimeZone: 'Asia/Tbilisi' });
+  const date = new Date(); date.setUTCHours(0, 0, 0, 0);
+  const midnight = date.getTime() - 3 * 86400000;
+  for (let i = 0; i < 3; i++) await recordResult('a', { ...result(i), timestamp: midnight + 19 * 3600000 + i * 1000 });
+  const afterMidnight = midnight + 21 * 3600000;
+  const uploaded = await recordResult('a', { ...result(10), timestamp: afterMidnight });
+  assert.equal(uploaded.result.counted, true);
+  assert.notEqual(challengeDay(midnight + 19 * 3600000, 'Asia/Tbilisi'), challengeDay(afterMidnight, 'Asia/Tbilisi'));
+  assert.equal((await UserStats.findOne({ userId: 'a' })).totalChallenges, 4);
+});
+
+test('time zone is pinned after first account configuration', async () => {
+  await account('a');
+  assert.equal((await request('/user/onboarding', { timeZone: 'Asia/Tbilisi' })).status, 200);
+  assert.equal((await request('/user/onboarding', { timeZone: 'America/New_York' })).status, 200);
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).challengeTimeZone, 'Asia/Tbilisi');
+});
+
+test('difficulty validation uses the server settings at the event start', async () => {
+  const now = Date.now();
+  await account('a', { difficultyLevel: 'HARD', challengeSettings: [
+    { effectiveAt: new Date(now - 86400000), difficultyLevel: 'EASY', dailyChallengeLimit: 5, targetApps: ['YouTube'] },
+    { effectiveAt: new Date(now - 50000), difficultyLevel: 'HARD', dailyChallengeLimit: 5, targetApps: ['YouTube'] },
+  ] });
+  await recordResult('a', { ...result(1), elapsedTime: 7, timestamp: now - 100000 });
+  await assert.rejects(() => recordResult('a', { ...result(2), elapsedTime: 7, timestamp: now - 1000 }), (error) => error.status === 422);
+  await assert.rejects(() => recordResult('a', { ...result(3), targetApp: 'Instagram', timestamp: now - 2000 }), (error) => error.status === 422);
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 10);
+});
+
+test('a revoked token cannot delete an existing account', async () => {
+  await account('a');
+  revoked = true;
+  assert.equal((await request('/user/account', null, 'DELETE')).status, 401);
+  assert.equal(await UserOnboarding.countDocuments({ uid: 'a' }), 1);
+});
+
+test('latest settings win when baseline and update share a timestamp', async () => {
+  const effectiveAt = new Date(Date.now() - 100000);
+  await account('a', { difficultyLevel: 'HARD', challengeSettings: [
+    { effectiveAt, difficultyLevel: 'EASY', dailyChallengeLimit: 5, targetApps: ['YouTube'] },
+    { effectiveAt, difficultyLevel: 'HARD', dailyChallengeLimit: 5, targetApps: ['YouTube'] },
+  ] });
+  await assert.rejects(() => recordResult('a', { ...result(7), elapsedTime: 6, timestamp: Date.now() - 1000 }), (error) => error.status === 422);
 });

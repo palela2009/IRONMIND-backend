@@ -1,11 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
-import { UserStats } from '../models/UserStats';
-import { ChallengeResult } from '../models/ChallengeResult';
-import { ScreenTime } from '../models/ScreenTime';
-import { FriendRequest } from '../models/FriendRequest';
-import { Duel } from '../models/Duel';
-import admin from '../config/firebaseAdmin';
+import { deleteAccount } from '../services/accountDeletion';
+import { validTimeZone } from '../services/challengeTime';
+import { saveOnboarding } from '../services/onboarding';
 
 const router = Router();
 
@@ -22,6 +19,7 @@ router.get('/onboarding', async (req: Request, res: Response): Promise<any> => {
       difficultyLevel: doc.difficultyLevel,
       dailyChallengeLimit: doc.dailyChallengeLimit,
       appLimits: doc.appLimits ?? [],
+      timeZone: doc.challengeTimeZone ?? 'UTC',
     });
   } catch (error) {
     console.error('Error fetching onboarding:', error);
@@ -40,6 +38,7 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
       return res.status(400).json({ message: 'targetApps, goals, and difficultyLevel are required' });
     }
 
+    if (req.body.timeZone !== undefined && !validTimeZone(req.body.timeZone)) return res.status(400).json({ message: 'Invalid time zone' });
     const setFields: Record<string, unknown> = { uid, email: req.email, verifiedEmail: req.verifiedEmail };
     if (displayName !== undefined) setFields.displayName = displayName;
     if (photoURL !== undefined) setFields.photoURL = photoURL;
@@ -56,11 +55,7 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
         .map((l: any) => ({ app: l.app, minutes: Math.round(l.minutes) }));
     }
 
-    const onboarding = await UserOnboarding.findOneAndUpdate(
-      { uid },
-      { $set: setFields },
-      { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
-    );
+    const onboarding = await saveOnboarding(uid, setFields, req.body.timeZone);
 
     console.log(`🧠 [API]: Onboarding saved for user: ${uid}`);
 
@@ -96,29 +91,11 @@ router.post('/photo', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.delete('/account', async (req: Request, res: Response): Promise<any> => {
-  const uid = req.uid;
-  try {
-    await Promise.all([
-      UserOnboarding.deleteOne({ uid }),
-      UserStats.deleteOne({ userId: uid }),
-      ChallengeResult.deleteMany({ userId: uid }),
-      ScreenTime.deleteMany({ userId: uid }),
-      FriendRequest.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
-      Duel.deleteMany({ $or: [{ fromUid: uid }, { toUid: uid }] }),
-    ]);
-
-    try {
-      await admin.auth().deleteUser(uid);
-    } catch (authError) {
-      console.error(`Error deleting Firebase Auth user ${uid}:`, authError);
-    }
-
-    console.log(`🗑️ [API]: Account deleted for user: ${uid}`);
-    return res.status(200).json({ message: 'Account deleted' });
-  } catch (error) {
-    console.error('Error deleting account:', error);
-    return res.status(500).json({ message: 'Server error while deleting account' });
+router.delete('/account', async (req: Request, res: Response) => {
+  try { await deleteAccount(req.uid); res.json({ message: 'Account deleted' }); }
+  catch (error) {
+    console.error('Account deletion requires retry:', error);
+    res.status(503).json({ message: 'Account deletion is not finished. Please retry; entry fees have been protected.' });
   }
 });
 

@@ -6,6 +6,9 @@ export interface IUserOnboarding extends Document {
   verifiedEmail?: string | null;
   socialNotifications: boolean;
   progressRevision: number;
+  deletionRequestedAt: Date | null;
+  challengeTimeZone: string | null;
+  challengeSettings: { effectiveAt: Date; difficultyLevel: string; dailyChallengeLimit: number; targetApps: string[] }[];
   displayName?: string;
   photoURL?: string;
   photoData?: Buffer;
@@ -50,6 +53,9 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   verifiedEmail: { type: String, default: null },
   socialNotifications: { type: Boolean, default: true },
   progressRevision: { type: Number, default: 0 },
+  deletionRequestedAt: { type: Date, default: null },
+  challengeTimeZone: { type: String, default: null },
+  challengeSettings: { type: [{ effectiveAt: Date, difficultyLevel: String, dailyChallengeLimit: Number, targetApps: [String] }], default: [] },
   displayName: { type: String },
   photoURL: { type: String },
   photoData: { type: Buffer, select: false },

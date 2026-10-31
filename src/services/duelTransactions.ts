@@ -18,6 +18,10 @@ export async function acceptDuel(id: string, uid: string) {
     if (!duel || duel.toUid !== uid) throw new DuelError(404, 'Duel not found');
     if (duel.status === 'active') return { duel, changed: false };
     if (duel.status !== 'pending') throw new DuelError(409, `That duel is already ${duel.status}`);
+    for (const participant of [duel.fromUid, duel.toUid]) {
+      const active = await UserOnboarding.findOneAndUpdate({ uid: participant, deletionRequestedAt: null }, { $inc: { progressRevision: 1 } }, { session });
+      if (!active) throw new DuelError(409, 'A participant account is unavailable');
+    }
     if (duel.stake > 0) {
       for (const payer of [duel.fromUid, duel.toUid]) {
         const paid = await UserOnboarding.findOneAndUpdate(

@@ -5,6 +5,7 @@ import { ChallengeDay } from '../models/ChallengeDay';
 import { UserStats } from '../models/UserStats';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { isProActive } from '../routes/proRoutes';
+import { challengeDay } from './challengeTime';
 
 const APPS = ['Instagram', 'YouTube', 'TikTok', 'Facebook', 'X (Twitter)', 'Reddit', 'Snapchat'];
 
@@ -28,7 +29,7 @@ export function parseChallenge(body: any) {
 export async function recordResult(uid: string, body: unknown) {
   const input = parseChallenge(body);
   return mongoose.connection.transaction(async (session) => {
-    const profile = await UserOnboarding.findOneAndUpdate({ uid }, { $inc: { progressRevision: 1 } }, { returnDocument: 'after', session });
+    const profile = await UserOnboarding.findOneAndUpdate({ uid, deletionRequestedAt: null }, { $inc: { progressRevision: 1 } }, { returnDocument: 'after', session });
     if (!profile) throw new ChallengeError(409, 'Complete account setup before syncing');
     const duplicate = await ChallengeResult.findOne({ userId: uid, eventId: input.eventId }).session(session);
     if (duplicate) return { duplicate: true, result: duplicate };
@@ -37,10 +38,19 @@ export async function recordResult(uid: string, body: unknown) {
     const sameEvent = await ChallengeResult.findOne({ userId: uid, targetApp: input.targetApp, timestamp: input.timestamp }).session(session);
     if (sameEvent) return { duplicate: true, result: sameEvent };
 
-    const dayId = `${uid}:${new Date(input.timestamp).toISOString().slice(0, 10)}`;
-    const limit = [3, 5, 10].includes(profile.dailyChallengeLimit) ? profile.dailyChallengeLimit : 5;
+    const timeZone = profile.challengeTimeZone ?? 'UTC';
+    const dayId = `${uid}:${challengeDay(input.timestamp, timeZone)}`;
+    const settings = [...profile.challengeSettings].reverse().find((entry) => entry.effectiveAt.getTime() <= input.timestamp) ?? profile;
+    const windowSeconds = ({ EASY: 10, INTERMEDIATE: 5, HARD: 3 } as Record<string, number>)[settings.difficultyLevel] ?? 10;
+    if (input.wasSuccessful && input.elapsedTime >= windowSeconds) throw new ChallengeError(422, 'Result exceeds your configured challenge window');
+    if (settings.targetApps.length && !settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
+    const limit = [3, 5, 10].includes(settings.dailyChallengeLimit) ? settings.dailyChallengeLimit : 5;
     let day = await ChallengeDay.findById(dayId).session(session);
-    if (!day) day = new ChallengeDay({ _id: dayId, userId: uid, limit });
+    if (!day) {
+      const nearby = await ChallengeResult.find({ userId: uid, counted: { $ne: false }, timestamp: { $gte: input.timestamp - 172800000, $lte: input.timestamp + 172800000 } }).session(session);
+      const existing = nearby.filter((entry) => challengeDay(entry.timestamp, timeZone) === challengeDay(input.timestamp, timeZone));
+      day = new ChallengeDay({ _id: dayId, userId: uid, limit, count: existing.length, wins: existing.filter((entry) => entry.wasSuccessful).length, coins: existing.reduce((total, entry) => total + (entry.coinsGranted ?? 0), 0), perfectAwarded: existing.length >= limit });
+    }
     let stats = await UserStats.findOne({ userId: uid }).session(session);
     if (!stats) stats = new UserStats({ userId: uid });
 
@@ -67,7 +77,7 @@ export async function recordResult(uid: string, body: unknown) {
       const perfect = day.count === day.limit && day.wins === day.limit && !day.perfectAwarded;
       if (perfect) day.perfectAwarded = true;
       const wanted = ((input.wasSuccessful ? 10 : 0) + (perfect ? 50 : 0)) * (isProActive(profile) ? 2 : 1);
-      const receivedDay = new Date().toISOString().slice(0, 10);
+      const receivedDay = challengeDay(Date.now(), timeZone);
       const earnedToday = profile.coinEarnDate === receivedDay ? profile.coinEarnedToday : 0;
       granted = Math.max(0, Math.min(wanted, 500 - day.coins, 500 - earnedToday));
       day.coins += granted;
@@ -108,12 +118,13 @@ export async function progressFor(uid: string) {
   const [stats, history, profile] = await Promise.all([
     UserStats.findOne({ userId: uid }).lean(),
     ChallengeResult.find({ userId: uid }).sort({ timestamp: -1, _id: -1 }).limit(200).lean(),
-    UserOnboarding.findOne({ uid }).select('streakFreezes coins').lean(),
+    UserOnboarding.findOne({ uid }).select('streakFreezes coins challengeTimeZone').lean(),
   ]);
   return {
     stats: stats ?? { currentStreak: 0, longestStreak: 0, bestReactionTime: 0, totalChallenges: 0, successCount: 0, currentXP: 0, level: 1 },
     history: history.map((r) => ({ id: r.eventId ?? String(r._id), targetApp: r.targetApp, elapsedTime: r.elapsedTime, wasSuccessful: r.wasSuccessful, timestamp: r.timestamp, counted: r.counted, freezeUsed: r.freezeUsed })),
     streakFreezes: profile?.streakFreezes ?? 0,
     coins: profile?.coins ?? 0,
+    timeZone: profile?.challengeTimeZone ?? 'UTC',
   };
 }

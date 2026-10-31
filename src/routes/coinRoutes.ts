@@ -1,15 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
-import { isProActive } from './proRoutes';
+import { buyShopItem, ShopError, SHOP_PRICES } from '../services/shop';
 import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE, PRO_WEEK_DAYS } from '../constants/cosmetics';
 
 const router = Router();
-
-export const SHOP_PRICES = {
-  freeze: 100,
-  reclaim: 200,
-  theme: 200,
-};
 
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
@@ -33,96 +27,12 @@ router.post('/award', (_req: Request, res: Response) => {
   res.status(403).json({ message: 'Challenge rewards are granted automatically when results sync. Ad rewards are not enabled.' });
 });
 
-router.post('/buy', async (req: Request, res: Response): Promise<any> => {
+router.post('/buy', async (req: Request, res: Response) => {
   try {
-    const { item, themeId, cosmeticId } = req.body as {
-      item?: 'freeze' | 'reclaim' | 'theme' | 'frame' | 'nameEffect' | 'proWeek';
-      themeId?: string;
-      cosmeticId?: string;
-    };
-
-    const doc = await UserOnboarding.findOne({ uid: req.uid });
-    if (!doc) return res.status(404).json({ message: 'Account not found' });
-
-    let price = 0;
-    let update: Record<string, unknown> = {};
-
-    if (item === 'freeze') {
-      price = SHOP_PRICES.freeze;
-      update = { $inc: { coins: -price, streakFreezes: 1 } };
-    } else if (item === 'reclaim') {
-      return res.status(409).json({ message: 'Reclaim the specific challenge from your streak screen' });
-    } else if (item === 'theme') {
-      if (!themeId) return res.status(400).json({ message: 'themeId is required' });
-      if (doc.unlockedThemes?.includes(themeId)) {
-        return res.status(400).json({ message: 'You already own that theme' });
-      }
-      price = SHOP_PRICES.theme;
-      update = { $inc: { coins: -price }, $addToSet: { unlockedThemes: themeId } };
-    } else if (item === 'frame' || item === 'nameEffect') {
-      const table = item === 'frame' ? FRAME_PRICES : NAME_EFFECT_PRICES;
-      if (!cosmeticId || !(cosmeticId in table)) {
-        return res.status(400).json({ message: 'Unknown item' });
-      }
-      const ownedField = item === 'frame' ? 'ownedFrames' : 'ownedNameEffects';
-      const equippedField = item === 'frame' ? 'equippedFrame' : 'equippedNameEffect';
-      const owned = (item === 'frame' ? doc.ownedFrames : doc.ownedNameEffects) ?? [];
-      if (owned.includes(cosmeticId)) {
-        return res.status(400).json({ message: 'You already own that' });
-      }
-      price = table[cosmeticId];
-      update = {
-        $inc: { coins: -price },
-        $addToSet: { [ownedField]: cosmeticId },
-        $set: { [equippedField]: cosmeticId },
-      };
-    } else if (item === 'proWeek') {
-      if (isProActive(doc)) {
-        return res.status(400).json({ message: 'You already have Pro' });
-      }
-      const last = doc.proFromCoinsAt;
-      if (last) {
-        const now = new Date();
-        const sameMonth =
-          last.getUTCFullYear() === now.getUTCFullYear() && last.getUTCMonth() === now.getUTCMonth();
-        if (sameMonth) {
-          return res.status(409).json({ message: 'You can only buy Pro with coins once a month' });
-        }
-      }
-      price = PRO_WEEK_PRICE;
-      update = {
-        $inc: { coins: -price },
-        $set: {
-          proPlan: 'monthly',
-          proExpiresAt: new Date(Date.now() + PRO_WEEK_DAYS * 24 * 60 * 60 * 1000),
-          proFromCoinsAt: new Date(),
-          proSource: 'coins',
-        },
-      };
-    } else {
-      return res.status(400).json({ message: 'Unknown item' });
-    }
-
-    const updated = await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid, coins: { $gte: price } },
-      update,
-      { new: true }
-    );
-
-    if (!updated) return res.status(409).json({ message: 'Not enough coins' });
-
-    return res.status(200).json({
-      coins: updated.coins,
-      streakFreezes: updated.streakFreezes,
-      unlockedThemes: updated.unlockedThemes,
-      ownedFrames: updated.ownedFrames,
-      ownedNameEffects: updated.ownedNameEffects,
-      equippedFrame: updated.equippedFrame,
-      equippedNameEffect: updated.equippedNameEffect,
-    });
+    const doc = await buyShopItem(req.uid, req.body);
+    res.json({ coins: doc.coins, streakFreezes: doc.streakFreezes, unlockedThemes: doc.unlockedThemes, ownedFrames: doc.ownedFrames, ownedNameEffects: doc.ownedNameEffects, equippedFrame: doc.equippedFrame, equippedNameEffect: doc.equippedNameEffect });
   } catch (error) {
-    console.error('Error buying item:', error);
-    return res.status(500).json({ message: 'Server error while buying' });
+    res.status(error instanceof ShopError ? error.status : 503).json({ message: error instanceof ShopError ? error.message : 'Purchase could not be confirmed. Retry the same purchase.' });
   }
 });
 
