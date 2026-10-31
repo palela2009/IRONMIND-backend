@@ -235,7 +235,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         bestReactionTime: statsMap.get(fuid)?.bestReactionTime ?? 0,
         currentXP: statsMap.get(fuid)?.currentXP ?? 0,
         isPro: isProActive(profileMap.get(fuid) ?? null),
-        isOwner: isOwner(profileMap.get(fuid)?.email),
+        isOwner: isOwner(profileMap.get(fuid)?.verifiedEmail),
         frame: profileMap.get(fuid)?.equippedFrame ?? null,
         nameEffect: profileMap.get(fuid)?.equippedNameEffect ?? null,
       }))

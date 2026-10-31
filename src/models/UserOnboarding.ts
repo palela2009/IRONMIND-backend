@@ -3,6 +3,9 @@ import { Schema, model, Document } from 'mongoose';
 export interface IUserOnboarding extends Document {
   uid?: string;
   email?: string;
+  verifiedEmail?: string | null;
+  socialNotifications: boolean;
+  progressRevision: number;
   displayName?: string;
   photoURL?: string;
   photoData?: Buffer;
@@ -44,6 +47,9 @@ export interface IUserOnboarding extends Document {
 const userOnboardingSchema = new Schema<IUserOnboarding>({
   uid: { type: String, unique: true, sparse: true },
   email: { type: String },
+  verifiedEmail: { type: String, default: null },
+  socialNotifications: { type: Boolean, default: true },
+  progressRevision: { type: Number, default: 0 },
   displayName: { type: String },
   photoURL: { type: String },
   photoData: { type: Buffer, select: false },

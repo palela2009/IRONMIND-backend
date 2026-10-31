@@ -2,6 +2,8 @@ import { Schema, model, Document } from 'mongoose';
 
 export interface IUserStats extends Document {
   userId: string;
+  lostStreak: number;
+  reclaimableEventId: string | null;
   currentStreak: number;
   longestStreak: number;
   bestReactionTime: number;
@@ -14,6 +16,8 @@ export interface IUserStats extends Document {
 
 const userStatsSchema = new Schema<IUserStats>({
   userId: { type: String, required: true, unique: true, sparse: true },
+  lostStreak: { type: Number, default: 0 },
+  reclaimableEventId: { type: String, default: null },
   currentStreak: { type: Number, default: 0 },
   longestStreak: { type: Number, default: 0 },
   bestReactionTime: { type: Number, default: 0 },

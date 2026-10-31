@@ -80,10 +80,10 @@ export async function sendPush(
 ): Promise<void> {
   try {
     const user = await UserOnboarding.findOne({ uid: userId });
-    if (!user?.pushToken || !Expo.isExpoPushToken(user.pushToken)) return;
+    if (!user?.pushToken || user.socialNotifications === false || !Expo.isExpoPushToken(user.pushToken)) return;
 
     const [ticket] = await expo.sendPushNotificationsAsync([
-      { to: user.pushToken, title, body, sound: 'default' as const, data },
+      { to: user.pushToken, title, body, sound: 'default' as const, channelId: 'ironmind-social', data: { ...data, recipientUid: userId } },
     ]);
 
     if (ticket.status === 'error') {

@@ -1,4 +1,5 @@
 import { UserOnboarding } from '../models/UserOnboarding';
+import { isOwner } from './identity';
 
 const API = 'https://api.revenuecat.com/v1/subscribers';
 const ENTITLEMENT = 'pro';
@@ -38,7 +39,7 @@ export async function syncStorePurchase(uid: string) {
   if (active && ent) {
     const plan = planFor(ent.product_identifier);
     const current = await UserOnboarding.findOne({ uid });
-    if (current?.proSource === 'owner') return current;
+    if (isOwner(current?.verifiedEmail)) return current;
 
     const newlyPro = current?.proSource !== 'store';
     return UserOnboarding.findOneAndUpdate(

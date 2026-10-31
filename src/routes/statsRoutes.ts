@@ -6,7 +6,7 @@ import { sendPush } from '../services/notifications';
 
 const router = Router();
 
-async function notifyOvertakenFriends(uid: string, before: number, after: number): Promise<void> {
+export async function notifyOvertakenFriends(uid: string, before: number, after: number): Promise<void> {
   if (after <= before) return;
 
   const links = await FriendRequest.find({
@@ -59,28 +59,8 @@ router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/', async (req: Request, res: Response): Promise<any> => {
-  try {
-    const userId = req.uid;
-    const { currentStreak, longestStreak, bestReactionTime, totalChallenges, successCount, currentXP, level } = req.body;
-
-    const previous = await UserStats.findOne({ userId });
-
-    const updatedStats = await UserStats.findOneAndUpdate(
-      { userId },
-      { currentStreak, longestStreak, bestReactionTime, totalChallenges, successCount, currentXP, level, updatedAt: new Date() },
-      { new: true, upsert: true }
-    );
-
-    console.log(`🎯 [API]: Stats updated for user: ${userId} | streak: ${currentStreak} | longest: ${longestStreak}`);
-
-    notifyOvertakenFriends(userId as string, previous?.currentStreak ?? 0, Number(currentStreak) || 0).catch(() => {});
-
-    return res.status(200).json(updatedStats);
-  } catch (error) {
-    console.error('Error saving stats:', error);
-    return res.status(500).json({ message: 'Server error while saving stats' });
-  }
+router.post('/', (_req: Request, res: Response) => {
+  res.status(409).json({ message: 'Stats are calculated from synced challenge results. Update IRONMIND to sync progress.' });
 });
 
 export default router;

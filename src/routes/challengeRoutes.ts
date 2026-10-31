@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { ChallengeResult } from '../models/ChallengeResult';
 import { sendChallengeNotification } from '../services/notifications';
+import { recordResult, reclaimResult, progressFor, ChallengeError } from '../services/challenges';
+import { notifyOvertakenFriends } from './statsRoutes';
 const router = Router();
 
 router.post('/notify', async (req: Request, res: Response): Promise<any> => {
@@ -25,7 +27,7 @@ router.get('/results', async (req: Request, res: Response): Promise<any> => {
 
     return res.status(200).json(
       results.map((r) => ({
-        id: String(r._id),
+        id: r.eventId ?? String(r._id),
         targetApp: r.targetApp,
         elapsedTime: r.elapsedTime,
         timestamp: r.timestamp,
@@ -38,23 +40,28 @@ router.get('/results', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/result', async (req: Request, res: Response): Promise<any> => {
+router.get('/progress', async (req: Request, res: Response) => {
+  try { res.json(await progressFor(req.uid)); }
+  catch { res.status(503).json({ message: 'Progress is temporarily unavailable' }); }
+});
+
+router.post('/result', async (req: Request, res: Response) => {
   try {
-    const userId = req.uid;
-    const { targetApp, elapsedTime, wasSuccessful, timestamp } = req.body;
-
-    if (!targetApp || elapsedTime == null || wasSuccessful == null || !timestamp) {
-      return res.status(400).json({ message: 'targetApp, elapsedTime, wasSuccessful, and timestamp are required' });
-    }
-
-    const result = await ChallengeResult.create({ userId, targetApp, elapsedTime, wasSuccessful, timestamp });
-
-    console.log(`📲 [API]: Challenge result saved for user: ${userId} | app: ${targetApp} | success: ${wasSuccessful}`);
-
-    return res.status(201).json(result);
+    const result = await recordResult(req.uid, req.body);
+    if (!result.duplicate && result.beforeStreak !== undefined && result.afterStreak !== undefined) void notifyOvertakenFriends(req.uid, result.beforeStreak, result.afterStreak).catch(() => {});
+    res.json({ ...result, ...(await progressFor(req.uid)) });
   } catch (error) {
-    console.error('Error saving challenge result:', error);
-    return res.status(500).json({ message: 'Server error while saving challenge result' });
+    const status = error instanceof ChallengeError ? error.status : 503;
+    res.status(status).json({ message: error instanceof ChallengeError ? error.message : 'Progress could not sync. Please retry.' });
+  }
+});
+
+router.post('/reclaim', async (req: Request, res: Response) => {
+  try {
+    await reclaimResult(req.uid, req.body?.eventId);
+    res.json(await progressFor(req.uid));
+  } catch (error) {
+    res.status(error instanceof ChallengeError ? error.status : 503).json({ message: error instanceof ChallengeError ? error.message : 'Reclaim could not sync. Please retry.' });
   }
 });
 

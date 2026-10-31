@@ -1,14 +1,18 @@
 import { Router, Request, Response } from 'express';
-import { Duel, IDuel } from '../models/Duel';
+import { Duel } from '../models/Duel';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { FriendRequest } from '../models/FriendRequest';
 import { sendPush } from '../services/notifications';
 import { DUEL_REACTIONS, REACTION_COOLDOWN_MS } from '../constants/reactions';
+import { acceptDuel, cancelDuel, settleDuel, DuelError } from '../services/duelTransactions';
+import { isValidObjectId } from 'mongoose';
 
 const router = Router();
+router.param('id', (_req, res, next, id) => {
+  if (!isValidObjectId(id)) { res.status(400).json({ message: 'Invalid duel ID' }); return; }
+  next();
+});
 
-const DUEL_DURATION_MS = 24 * 60 * 60 * 1000;
-const SETTLE_GRACE_MS = 10 * 60 * 1000;
 
 function nameFor(profile?: { displayName?: string; email?: string } | null): string {
   return profile?.displayName || profile?.email || 'Unknown';
@@ -22,57 +26,16 @@ async function areFriends(a: string, b: string): Promise<boolean> {
   return !!link;
 }
 
-async function refundAntes(duel: IDuel): Promise<void> {
-  if (duel.stake <= 0) return;
-  await UserOnboarding.updateMany(
-    { uid: { $in: [duel.fromUid, duel.toUid] } },
-    { $inc: { coins: duel.stake } }
-  );
-}
-
-async function settleDuel(duel: IDuel): Promise<void> {
-  const { fromMinutes, toMinutes } = duel;
-
-  if (fromMinutes === null || toMinutes === null || fromMinutes === toMinutes) {
-    duel.status = 'void';
-    await duel.save();
-    await refundAntes(duel);
-    return;
-  }
-
-  const winnerUid = fromMinutes < toMinutes ? duel.fromUid : duel.toUid;
-
-  duel.winnerUid = winnerUid;
-  duel.status = 'completed';
-  await duel.save();
-
-  if (duel.stake > 0) {
-    await UserOnboarding.updateOne({ uid: winnerUid }, { $inc: { coins: duel.stake * 2 } });
-  }
-
-  const loserUid = winnerUid === duel.fromUid ? duel.toUid : duel.fromUid;
-  const [winner, loser] = await Promise.all([
-    UserOnboarding.findOne({ uid: winnerUid }),
-    UserOnboarding.findOne({ uid: loserUid }),
-  ]);
-
-  sendPush(winnerUid, 'Duel won', duel.stake > 0 ? `You beat ${nameFor(loser)} on ${duel.app}. Pot: ${duel.stake * 2} coins.` : `You beat ${nameFor(loser)} on ${duel.app}.`, {
-    type: 'duel_result',
-  });
-  sendPush(loserUid, 'Duel lost', `${nameFor(winner)} spent less time on ${duel.app}.`, {
-    type: 'duel_result',
-  });
-}
-
 async function settleExpiredFor(uid: string): Promise<void> {
-  const cutoff = new Date(Date.now() - SETTLE_GRACE_MS);
-  const expired = await Duel.find({
-    status: 'active',
-    endAt: { $lte: cutoff },
-    $or: [{ fromUid: uid }, { toUid: uid }],
-  });
-  for (const duel of expired) {
-    await settleDuel(duel);
+  const expired = await Duel.find({ status: 'active', endAt: { $lte: new Date() }, $or: [{ fromUid: uid }, { toUid: uid }] });
+  for (const duel of expired) await settleAndNotify(String(duel._id));
+}
+
+async function settleAndNotify(id: string) {
+  const duel = await settleDuel(id);
+  if (!duel) return;
+  for (const uid of [duel.fromUid, duel.toUid]) {
+    void sendPush(uid, duel.status === 'void' ? 'Duel refunded' : duel.winnerUid === uid ? 'Duel won' : 'Duel finished', duel.resolutionReason ?? 'View your final result.', { type: 'duel_result', duelId: id });
   }
 }
 
@@ -107,6 +70,8 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
 
     const requested = Number(stake);
     const ante = Number.isFinite(requested) && requested >= 0 ? Math.round(requested) : 50;
+
+    if (!Number.isSafeInteger(ante) || ante > 10000) return res.status(400).json({ message: 'Entry fee must be between 0 and 10000 coins' });
 
     if (ante > 0) {
       const me = await UserOnboarding.findOne({ uid });
@@ -153,6 +118,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
         apps: d.apps?.length ? d.apps : [d.app],
         stake: d.stake,
         status: d.status,
+        resolutionReason: d.resolutionReason ?? null,
         startAt: d.startAt,
         endAt: d.endAt,
         opponentUid,
@@ -176,96 +142,26 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/:id/accept', async (req: Request, res: Response): Promise<any> => {
+router.post('/:id/accept', async (req: Request, res: Response) => {
   try {
-    const duel = await Duel.findById(req.params.id);
-    if (!duel || duel.toUid !== req.uid) {
-      return res.status(404).json({ message: 'Duel not found' });
-    }
-    if (duel.status !== 'pending') {
-      return res.status(409).json({ message: `That duel is already ${duel.status}` });
-    }
-
-    const challenger = duel.stake <= 0 ? true : await UserOnboarding.findOneAndUpdate(
-      { uid: duel.fromUid, coins: { $gte: duel.stake } },
-      { $inc: { coins: -duel.stake } },
-      { new: true }
-    );
-    if (!challenger) {
-      return res.status(409).json({ message: 'They cannot cover the ante right now' });
-    }
-
-    const opponent = duel.stake <= 0 ? true : await UserOnboarding.findOneAndUpdate(
-      { uid: duel.toUid, coins: { $gte: duel.stake } },
-      { $inc: { coins: -duel.stake } },
-      { new: true }
-    );
-    if (!opponent) {
-      await UserOnboarding.updateOne({ uid: duel.fromUid }, { $inc: { coins: duel.stake } });
-      return res.status(409).json({ message: `You need ${duel.stake} coins to accept` });
-    }
-
-    const now = new Date();
-    duel.status = 'active';
-    duel.startAt = now;
-    duel.endAt = new Date(now.getTime() + DUEL_DURATION_MS);
-    await duel.save();
-
-    const accepter = await UserOnboarding.findOne({ uid: duel.toUid });
-    sendPush(
-      duel.fromUid,
-      'Duel accepted',
-      `${nameFor(accepter)} took your ${duel.app} duel. 24 hours starting now.`,
-      { type: 'duel_accepted', duelId: String(duel._id) }
-    );
-
-    return res.status(200).json(duel);
-  } catch (error) {
-    console.error('Error accepting duel:', error);
-    return res.status(500).json({ message: 'Server error while accepting duel' });
-  }
+    const { duel, changed } = await acceptDuel(String(req.params.id), req.uid);
+    if (changed) void sendPush(duel.fromUid, 'Duel accepted', 'Your 24-hour duel has started. Open IRONMIND after it ends to sync final usage.', { type: 'duel_accepted', duelId: String(duel._id) });
+    res.json(duel);
+  } catch (error) { res.status(error instanceof DuelError ? error.status : 503).json({ message: error instanceof DuelError ? error.message : 'Could not accept the duel. Try again.' }); }
 });
 
-router.post('/:id/decline', async (req: Request, res: Response): Promise<any> => {
+router.post('/:id/decline', async (req: Request, res: Response) => {
   try {
-    const duel = await Duel.findById(req.params.id);
-    if (!duel || duel.toUid !== req.uid || duel.status !== 'pending') {
-      return res.status(404).json({ message: 'Duel not found' });
-    }
-    duel.status = 'declined';
-    await duel.save();
-    return res.status(200).json({ message: 'Duel declined' });
-  } catch (error) {
-    console.error('Error declining duel:', error);
-    return res.status(500).json({ message: 'Server error while declining duel' });
-  }
+    const duel = await Duel.findOneAndUpdate({ _id: req.params.id, toUid: req.uid, status: 'pending' }, { $set: { status: 'declined' } });
+    res.status(duel ? 200 : 409).json({ message: duel ? 'Duel declined' : 'That challenge is no longer pending' });
+  } catch { res.status(503).json({ message: 'Could not decline the duel' }); }
 });
 
-router.post('/:id/cancel', async (req: Request, res: Response): Promise<any> => {
+router.post('/:id/cancel', async (req: Request, res: Response) => {
   try {
-    const uid = req.uid as string;
-    const duel = await Duel.findById(req.params.id);
-
-    if (!duel || (duel.fromUid !== uid && duel.toUid !== uid)) {
-      return res.status(404).json({ message: 'Duel not found' });
-    }
-    if (duel.status !== 'pending' && duel.status !== 'active') {
-      return res.status(400).json({ message: 'That duel is already finished' });
-    }
-
-    const wasActive = duel.status === 'active';
-
-    duel.status = 'cancelled';
-    duel.winnerUid = null;
-    await duel.save();
-
-    if (wasActive) await refundAntes(duel);
-
-    return res.status(200).json({ message: 'Duel cancelled' });
-  } catch (error) {
-    console.error('Error cancelling duel:', error);
-    return res.status(500).json({ message: 'Server error while cancelling duel' });
-  }
+    await cancelDuel(String(req.params.id), req.uid);
+    res.json({ message: 'Duel cancelled. Any entry fees were refunded.' });
+  } catch (error) { res.status(error instanceof DuelError ? error.status : 503).json({ message: error instanceof DuelError ? error.message : 'Could not cancel the duel. Try again.' }); }
 });
 
 router.post('/:id/react', async (req: Request, res: Response): Promise<any> => {
@@ -314,42 +210,22 @@ router.post('/:id/react', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/:id/report', async (req: Request, res: Response): Promise<any> => {
+router.post('/:id/report', async (req: Request, res: Response) => {
   try {
-    const uid = req.uid as string;
     const { minutes } = req.body;
-
-    if (typeof minutes !== 'number' || !isFinite(minutes) || minutes < 0) {
-      return res.status(400).json({ message: 'minutes must be a non-negative number' });
+    if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes < 0 || minutes > 1440) {
+      res.status(400).json({ message: 'Usage must be between 0 and 1440 minutes' }); return;
     }
-
     const duel = await Duel.findById(req.params.id);
-    if (!duel || (duel.fromUid !== uid && duel.toUid !== uid)) {
-      return res.status(404).json({ message: 'Duel not found' });
-    }
-    if (duel.status !== 'active') {
-      return res.status(400).json({ message: 'Duel is not active' });
-    }
-
-    const now = new Date();
-    if (duel.fromUid === uid) {
-      duel.fromMinutes = minutes;
-      duel.fromReportedAt = now;
-    } else {
-      duel.toMinutes = minutes;
-      duel.toReportedAt = now;
-    }
-    await duel.save();
-
-    if (duel.endAt && now >= duel.endAt) {
-      await settleDuel(duel);
-    }
-
-    return res.status(200).json({ message: 'Reported', status: duel.status });
-  } catch (error) {
-    console.error('Error reporting duel usage:', error);
-    return res.status(500).json({ message: 'Server error while reporting duel usage' });
-  }
+    if (!duel || (duel.fromUid !== req.uid && duel.toUid !== req.uid)) { res.status(404).json({ message: 'Duel not found' }); return; }
+    const side = duel.fromUid === req.uid ? 'from' : 'to';
+    const updated = await Duel.findOneAndUpdate({ _id: duel._id, status: 'active' }, {
+      $max: { [side + 'Minutes']: minutes }, $set: { [side + 'ReportedAt']: new Date() }
+    }, { new: true });
+    if (!updated) { res.status(409).json({ message: 'Duel is already finished' }); return; }
+    await settleAndNotify(String(duel._id));
+    res.json({ message: 'Usage synced' });
+  } catch { res.status(503).json({ message: 'Could not sync usage. Try again.' }); }
 });
 
 export default router;

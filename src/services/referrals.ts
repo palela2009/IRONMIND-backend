@@ -9,7 +9,7 @@ export const REFERRAL_MILESTONES = [
 ];
 
 export const REFERRAL_WINDOW_DAYS = 7;
-const SAME_DEVICE_CHECK = false;
+const SAME_DEVICE_CHECK = true;
 const PRO_MONTHLY_FREEZES = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -20,7 +20,7 @@ export async function attributeReferral(newUid: string, inviterUid: string, devi
   const inviter = await UserOnboarding.findOne({ uid: inviterUid });
   if (!inviter) return false;
 
-  if (SAME_DEVICE_CHECK && !isOwner(inviter.email)) {
+  if (SAME_DEVICE_CHECK && !isOwner(inviter.verifiedEmail)) {
     if (!deviceHash || inviter.deviceIds?.includes(deviceHash)) return false;
     const deviceAlreadyUsed = await UserOnboarding.exists({
       uid: { $ne: newUid },

@@ -5,25 +5,11 @@ import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE, PRO_WEEK_DAYS } from 
 
 const router = Router();
 
-export type EarnReason = 'challenge_win' | 'perfect_day' | 'rewarded_ad';
-
-const EARN_AMOUNTS: Record<EarnReason, number> = {
-  challenge_win: 10,
-  perfect_day: 50,
-  rewarded_ad: 25,
-};
-
-const PRO_MULTIPLIER = 2;
-
-const DAILY_EARN_CAP = 500;
-
 export const SHOP_PRICES = {
   freeze: 100,
   reclaim: 200,
   theme: 200,
 };
-
-const todayKey = (): string => new Date().toISOString().slice(0, 10);
 
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
@@ -43,42 +29,8 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/award', async (req: Request, res: Response): Promise<any> => {
-  try {
-    const reason = req.body?.reason as EarnReason;
-    if (!reason || !(reason in EARN_AMOUNTS)) {
-      return res.status(400).json({ message: 'Unknown reason' });
-    }
-
-    const doc = await UserOnboarding.findOne({ uid: req.uid });
-    if (!doc) return res.status(404).json({ message: 'Account not found' });
-
-    const today = todayKey();
-    const earnedToday = doc.coinEarnDate === today ? doc.coinEarnedToday : 0;
-
-    const base = EARN_AMOUNTS[reason];
-    const multiplier = isProActive(doc) ? PRO_MULTIPLIER : 1;
-    const wanted = base * multiplier;
-    const granted = Math.max(0, Math.min(wanted, DAILY_EARN_CAP - earnedToday));
-
-    if (granted === 0) {
-      return res.status(200).json({ coins: doc.coins, granted: 0, capped: true });
-    }
-
-    const updated = await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid },
-      {
-        $inc: { coins: granted },
-        $set: { coinEarnDate: today, coinEarnedToday: earnedToday + granted },
-      },
-      { new: true }
-    );
-
-    return res.status(200).json({ coins: updated?.coins ?? 0, granted, capped: false });
-  } catch (error) {
-    console.error('Error awarding coins:', error);
-    return res.status(500).json({ message: 'Server error while awarding coins' });
-  }
+router.post('/award', (_req: Request, res: Response) => {
+  res.status(403).json({ message: 'Challenge rewards are granted automatically when results sync. Ad rewards are not enabled.' });
 });
 
 router.post('/buy', async (req: Request, res: Response): Promise<any> => {
@@ -99,8 +51,7 @@ router.post('/buy', async (req: Request, res: Response): Promise<any> => {
       price = SHOP_PRICES.freeze;
       update = { $inc: { coins: -price, streakFreezes: 1 } };
     } else if (item === 'reclaim') {
-      price = SHOP_PRICES.reclaim;
-      update = { $inc: { coins: -price } };
+      return res.status(409).json({ message: 'Reclaim the specific challenge from your streak screen' });
     } else if (item === 'theme') {
       if (!themeId) return res.status(400).json({ message: 'themeId is required' });
       if (doc.unlockedThemes?.includes(themeId)) {

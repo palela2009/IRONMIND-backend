@@ -20,6 +20,7 @@ export interface IDuel extends Document {
   toReaction: string | null;
   toReactedAt: Date | null;
   winnerUid: string | null;
+  resolutionReason: string | null;
   createdAt: Date;
 }
 
@@ -44,6 +45,7 @@ const duelSchema = new Schema<IDuel>({
   toReaction: { type: String, default: null },
   toReactedAt: { type: Date, default: null },
 
+  resolutionReason: { type: String, default: null },
   winnerUid: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
 });

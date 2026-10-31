@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { UserOnboarding, IUserOnboarding } from '../models/UserOnboarding';
 import { syncStorePurchase, revenueCatConfigured } from '../services/revenuecat';
 import { deviceHashFor, rememberDevice } from '../services/device';
+import { isOwner } from '../services/identity';
+export { isOwner } from '../services/identity';
 
 const router = Router();
 
@@ -13,26 +15,16 @@ const STARTER_COINS = 150;
 
 const OWNER_COINS = 10000;
 
-const ownerEmails = (): string[] =>
-  (process.env.OWNER_EMAILS ?? '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-
-export function isOwner(email?: string | null): boolean {
-  if (!email) return false;
-  return ownerEmails().includes(email.toLowerCase());
-}
-
 export function isTrialActive(doc: Pick<IUserOnboarding, 'trialEndsAt'> | null): boolean {
   return !!doc?.trialEndsAt && doc.trialEndsAt.getTime() > Date.now();
 }
 
 export function isProActive(
-  doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt' | 'email' | 'trialEndsAt'> | null
+  doc: Pick<IUserOnboarding, 'proPlan' | 'proExpiresAt' | 'verifiedEmail' | 'trialEndsAt' | 'proSource'> | null
 ): boolean {
   if (!doc) return false;
-  if (isOwner(doc.email)) return true;
+  if (isOwner(doc.verifiedEmail)) return true;
+  if (doc.proSource === 'owner') return false;
   if (isTrialActive(doc)) return true;
   if (!doc.proPlan) return false;
   if (doc.proPlan === 'lifetime') return true;
@@ -47,7 +39,7 @@ function needsRefill(last: Date | null | undefined): boolean {
 
 async function refillFreezes(uid: string) {
   return UserOnboarding.findOneAndUpdate(
-    { uid },
+    { uid, $or: [{ freezesRefilledAt: null }, { freezesRefilledAt: { $lt: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)) } }] },
     {
       $max: { streakFreezes: PRO_MONTHLY_FREEZES },
       $inc: { coins: PRO_MONTHLY_COINS },
@@ -60,7 +52,7 @@ async function refillFreezes(uid: string) {
 function entitlementPayload(doc: IUserOnboarding | null) {
   return {
     isPro: isProActive(doc),
-    isOwner: isOwner(doc?.email),
+    isOwner: isOwner(doc?.verifiedEmail),
     plan: doc?.proPlan ?? null,
     source: doc?.proSource ?? null,
     referralRewards: doc?.referralRewards ?? [],
@@ -84,7 +76,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     await rememberDevice(req.uid as string, deviceHashFor(req));
     let doc = await UserOnboarding.findOne({ uid: req.uid });
 
-    if (doc && isOwner(doc.email) && (doc.proPlan !== 'lifetime' || doc.proSource !== 'owner')) {
+    if (doc && isOwner(doc.verifiedEmail) && (doc.proPlan !== 'lifetime' || doc.proSource !== 'owner')) {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid },
         { $set: { proPlan: 'lifetime', proExpiresAt: null, proSource: 'owner' } },
@@ -101,7 +93,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       ) ?? doc;
     }
 
-    if (doc && isOwner(doc.email) && !doc.ownerCoinsGrantedAt) {
+    if (doc && isOwner(doc.verifiedEmail) && !doc.ownerCoinsGrantedAt) {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid, ownerCoinsGrantedAt: null },
         { $inc: { coins: OWNER_COINS }, $set: { ownerCoinsGrantedAt: new Date() } },
@@ -115,7 +107,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     }
 
     if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {
-      doc = await refillFreezes(req.uid as string);
+      doc = await refillFreezes(req.uid as string) ?? await UserOnboarding.findOne({ uid: req.uid });
       console.log(`❄ [API]: Monthly freezes refilled for ${req.uid}`);
     }
 
@@ -137,37 +129,12 @@ router.post('/sync', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
-router.post('/freeze/use', async (req: Request, res: Response): Promise<any> => {
-  try {
-    const doc = await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid, streakFreezes: { $gt: 0 } },
-      { $inc: { streakFreezes: -1 } },
-      { new: true }
-    );
-
-    if (!doc) {
-      return res.status(409).json({ message: 'No streak freezes available', streakFreezes: 0 });
-    }
-
-    return res.status(200).json({ message: 'Freeze used', streakFreezes: doc.streakFreezes });
-  } catch (error) {
-    console.error('Error using freeze:', error);
-    return res.status(500).json({ message: 'Server error while using freeze' });
-  }
+router.post('/freeze/use', (_req: Request, res: Response) => {
+  res.status(409).json({ message: 'Freezes are applied automatically when challenge results sync' });
 });
 
-router.post('/freeze/grant', async (req: Request, res: Response): Promise<any> => {
-  try {
-    const doc = await UserOnboarding.findOneAndUpdate(
-      { uid: req.uid },
-      { $inc: { streakFreezes: 1 } },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
-    return res.status(200).json({ streakFreezes: doc.streakFreezes });
-  } catch (error) {
-    console.error('Error granting freeze:', error);
-    return res.status(500).json({ message: 'Server error while granting freeze' });
-  }
+router.post('/freeze/grant', (_req: Request, res: Response) => {
+  res.status(403).json({ message: 'Freezes must be purchased or granted by a verified entitlement' });
 });
 
 router.post('/offer/close', async (req: Request, res: Response): Promise<any> => {

@@ -32,7 +32,7 @@ router.get('/onboarding', async (req: Request, res: Response): Promise<any> => {
 router.post('/onboarding', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
-    const { email, displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit, appLimits } = req.body;
+    const { displayName, photoURL, targetApps, goals, difficultyLevel, dailyChallengeLimit, appLimits } = req.body;
 
     const existing = await UserOnboarding.findOne({ uid });
 
@@ -40,14 +40,16 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
       return res.status(400).json({ message: 'targetApps, goals, and difficultyLevel are required' });
     }
 
-    const setFields: Record<string, unknown> = { uid };
-    if (email !== undefined) setFields.email = email;
+    const setFields: Record<string, unknown> = { uid, email: req.email, verifiedEmail: req.verifiedEmail };
     if (displayName !== undefined) setFields.displayName = displayName;
     if (photoURL !== undefined) setFields.photoURL = photoURL;
     if (targetApps !== undefined) setFields.targetApps = targetApps;
     if (goals !== undefined) setFields.goals = goals;
     if (difficultyLevel !== undefined) setFields.difficultyLevel = difficultyLevel;
-    if (dailyChallengeLimit !== undefined) setFields.dailyChallengeLimit = dailyChallengeLimit;
+    if (dailyChallengeLimit !== undefined) {
+      if (![3, 5, 10].includes(dailyChallengeLimit)) return res.status(400).json({ message: 'Choose 3, 5, or 10 daily challenges' });
+      setFields.dailyChallengeLimit = dailyChallengeLimit;
+    }
     if (Array.isArray(appLimits)) {
       setFields.appLimits = appLimits
         .filter((l: any) => typeof l?.app === 'string' && Number.isFinite(l?.minutes) && l.minutes >= 0)
@@ -57,7 +59,7 @@ router.post('/onboarding', async (req: Request, res: Response): Promise<any> => 
     const onboarding = await UserOnboarding.findOneAndUpdate(
       { uid },
       { $set: setFields },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
     );
 
     console.log(`🧠 [API]: Onboarding saved for user: ${uid}`);
@@ -118,6 +120,21 @@ router.delete('/account', async (req: Request, res: Response): Promise<any> => {
     console.error('Error deleting account:', error);
     return res.status(500).json({ message: 'Server error while deleting account' });
   }
+});
+
+router.get('/notifications', async (req: Request, res: Response) => {
+  try {
+    const profile = await UserOnboarding.findOne({ uid: req.uid }).select('socialNotifications');
+    res.json({ socialNotifications: profile?.socialNotifications !== false });
+  } catch { res.status(503).json({ message: 'Could not load notification settings' }); }
+});
+
+router.patch('/notifications', async (req: Request, res: Response) => {
+  if (typeof req.body?.socialNotifications !== 'boolean') { res.status(400).json({ message: 'A notification preference is required' }); return; }
+  try {
+    await UserOnboarding.updateOne({ uid: req.uid }, { $set: { socialNotifications: req.body.socialNotifications } });
+    res.json({ socialNotifications: req.body.socialNotifications });
+  } catch { res.status(503).json({ message: 'Could not save notification settings' }); }
 });
 
 export default router;
