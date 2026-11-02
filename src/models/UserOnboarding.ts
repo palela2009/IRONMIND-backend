@@ -34,6 +34,10 @@ export interface IUserOnboarding extends Document {
   trialEndsAt: Date | null;
   coins: number;
   starterCoinsGrantedAt: Date | null;
+  welcomeGiftEligible: boolean;
+  welcomeGiftTheme: string | null;
+  welcomeGiftClaimedAt: Date | null;
+  proCoinsGrantedAt: Date | null;
   ownerCoinsGrantedAt: Date | null;
   coinEarnDate: string | null;
   coinEarnedToday: number;
@@ -91,6 +95,10 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   coins: { type: Number, default: 0 },
 
   starterCoinsGrantedAt: { type: Date, default: null },
+  welcomeGiftEligible: { type: Boolean, default: false },
+  welcomeGiftTheme: { type: String, default: null },
+  welcomeGiftClaimedAt: { type: Date, default: null },
+  proCoinsGrantedAt: { type: Date, default: null },
 
   ownerCoinsGrantedAt: { type: Date, default: null },
   coinEarnDate: { type: String, default: null },

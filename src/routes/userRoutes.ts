@@ -80,7 +80,7 @@ router.post('/photo', async (req: Request, res: Response): Promise<any> => {
 
     await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
-      { $set: { photoData: buffer, photoContentType: contentType } },
+      { $set: { photoData: buffer, photoContentType: contentType }, $setOnInsert: { welcomeGiftEligible: true } },
       { upsert: true, setDefaultsOnInsert: true }
     );
 

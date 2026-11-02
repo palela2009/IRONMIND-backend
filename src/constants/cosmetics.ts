@@ -16,5 +16,5 @@ export const NAME_EFFECT_PRICES: Record<string, number> = {
   void: 200,
 };
 
-export const PRO_WEEK_PRICE = 1000;
+export const PRO_WEEK_PRICE = 500;
 export const PRO_WEEK_DAYS = 7;

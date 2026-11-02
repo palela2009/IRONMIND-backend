@@ -18,7 +18,7 @@ router.post('/save-token', async (req: Request, res: Response): Promise<any> => 
       await UserOnboarding.updateMany({ uid: { $ne: userId }, pushToken }, { $set: { pushToken: null } }, { session });
       await UserOnboarding.findOneAndUpdate(
         { uid: userId },
-        { $set: { pushToken } },
+        { $set: { pushToken }, $setOnInsert: { welcomeGiftEligible: true } },
         { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, session }
       );
     });

@@ -3,6 +3,7 @@ import { UserOnboarding, IUserOnboarding } from '../models/UserOnboarding';
 import { syncStorePurchase, revenueCatConfigured } from '../services/revenuecat';
 import { deviceHashFor, rememberDevice } from '../services/device';
 import { isOwner } from '../services/identity';
+import { claimWelcomeGift, WelcomeGiftError } from '../services/welcomeGift';
 export { isOwner } from '../services/identity';
 
 const router = Router();
@@ -42,9 +43,28 @@ async function refillFreezes(uid: string) {
     { uid, $or: [{ freezesRefilledAt: null }, { freezesRefilledAt: { $lt: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)) } }] },
     {
       $max: { streakFreezes: PRO_MONTHLY_FREEZES },
-      $inc: { coins: PRO_MONTHLY_COINS },
       $set: { freezesRefilledAt: new Date() },
     },
+    { new: true }
+  );
+}
+
+async function grantPaidProCoins(uid: string) {
+  const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+  const legacy = await UserOnboarding.findOne({ uid, proSource: 'store', proCoinsGrantedAt: { $exists: false } }).select('freezesRefilledAt');
+  if (legacy) await UserOnboarding.updateOne(
+    { uid, proSource: 'store', proCoinsGrantedAt: { $exists: false } },
+    { $set: { proCoinsGrantedAt: legacy.freezesRefilledAt ?? null } }
+  );
+  return UserOnboarding.findOneAndUpdate(
+    {
+      uid, deletionRequestedAt: null, proSource: 'store',
+      $and: [
+        { $or: [{ proPlan: 'lifetime' }, { proPlan: { $in: ['monthly', 'annual'] }, proExpiresAt: { $gt: new Date() } }] },
+        { $or: [{ proCoinsGrantedAt: null }, { proCoinsGrantedAt: { $lt: monthStart } }] },
+      ],
+    },
+    { $inc: { coins: PRO_MONTHLY_COINS }, $set: { proCoinsGrantedAt: new Date() } },
     { new: true }
   );
 }
@@ -66,6 +86,8 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     equippedNameEffect: doc?.equippedNameEffect ?? null,
     themeId: doc?.themeId ?? 'default',
     welcomeOffer: !doc?.welcomeOfferClosedAt && !isProActive(doc),
+    welcomeGiftAvailable: !!doc?.welcomeGiftEligible && !doc.welcomeGiftClaimedAt,
+    welcomeGiftTheme: doc?.welcomeGiftTheme ?? null,
     onTrial: isTrialActive(doc),
     trialEndsAt: doc?.trialEndsAt ?? null,
   };
@@ -106,6 +128,9 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       doc = await syncStorePurchase(req.uid as string).catch(() => doc);
     }
 
+    if (doc && isProActive(doc) && doc.proSource === 'store') {
+      doc = await grantPaidProCoins(req.uid as string) ?? await UserOnboarding.findOne({ uid: req.uid });
+    }
     if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {
       doc = await refillFreezes(req.uid as string) ?? await UserOnboarding.findOne({ uid: req.uid });
       console.log(`❄ [API]: Monthly freezes refilled for ${req.uid}`);
@@ -129,6 +154,14 @@ router.post('/sync', async (req: Request, res: Response): Promise<any> => {
   }
 });
 
+router.post('/welcome-gift', async (req: Request, res: Response) => {
+  try { res.json(entitlementPayload(await claimWelcomeGift(req.uid, req.body?.themeId))); }
+  catch (error) {
+    const status = error instanceof WelcomeGiftError ? error.status : 503;
+    res.status(status).json({ message: error instanceof WelcomeGiftError ? error.message : 'Could not claim your gift. Please retry.' });
+  }
+});
+
 router.post('/freeze/use', (_req: Request, res: Response) => {
   res.status(409).json({ message: 'Freezes are applied automatically when challenge results sync' });
 });
@@ -141,7 +174,7 @@ router.post('/offer/close', async (req: Request, res: Response): Promise<any> =>
   try {
     const doc = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
-      { $set: { welcomeOfferClosedAt: new Date() } },
+      { $set: { welcomeOfferClosedAt: new Date() }, $setOnInsert: { welcomeGiftEligible: true } },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
     return res.status(200).json(entitlementPayload(doc));
@@ -160,7 +193,7 @@ router.post('/theme', async (req: Request, res: Response): Promise<any> => {
 
     const doc = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
-      { $set: { themeId } },
+      { $set: { themeId }, $setOnInsert: { welcomeGiftEligible: true } },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 

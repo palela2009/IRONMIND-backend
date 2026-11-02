@@ -5,7 +5,7 @@ import { validTimeZone } from './challengeTime';
 export async function saveOnboarding(uid: string, fields: Record<string, unknown>, requestedZone: unknown) {
   return mongoose.connection.transaction(async (session) => {
     let doc = await UserOnboarding.findOneAndUpdate({ uid, deletionRequestedAt: null }, { $inc: { progressRevision: 1 } }, { returnDocument: 'after', session });
-    if (!doc) doc = new UserOnboarding({ uid });
+    if (!doc) doc = new UserOnboarding({ uid, welcomeGiftEligible: true });
     const snapshot = () => ({ effectiveAt: new Date(), difficultyLevel: doc!.difficultyLevel, dailyChallengeLimit: doc!.dailyChallengeLimit, targetApps: [...doc!.targetApps] });
     if (!doc.challengeSettings.length) doc.challengeSettings.push({ ...snapshot(), effectiveAt: doc.createdAt });
     const before = JSON.stringify([doc.difficultyLevel, doc.dailyChallengeLimit, doc.targetApps]);

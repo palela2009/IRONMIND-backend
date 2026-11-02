@@ -270,3 +270,76 @@ test('latest settings win when baseline and update share a timestamp', async () 
   ] });
   await assert.rejects(() => recordResult('a', { ...result(7), elapsedTime: 6, timestamp: Date.now() - 1000 }), (error) => error.status === 422);
 });
+
+test('a new account keeps 150 starter coins and claims one chosen theme and freeze once', async () => {
+  const created = await request('/user/onboarding', { targetApps: ['YouTube'], goals: ['focus'], difficultyLevel: 'EASY' });
+  assert.equal(created.status, 200);
+  const starter = await (await request('/pro', null, 'GET')).json();
+  assert.equal(starter.coins, 150);
+  assert.equal(starter.welcomeGiftAvailable, true);
+  const responses = await Promise.all(Array.from({ length: 10 }, (_, i) => request('/pro/welcome-gift', { themeId: i % 2 ? 'ice' : 'matrix' })));
+  assert.ok(responses.every((response) => response.status === 200));
+  const profile = await UserOnboarding.findOne({ uid: 'a' });
+  assert.equal(profile.coins, 150);
+  assert.equal(profile.streakFreezes, 1);
+  assert.equal(profile.unlockedThemes.length, 1);
+  assert.equal(profile.themeId, profile.welcomeGiftTheme);
+  assert.ok(profile.welcomeGiftClaimedAt);
+  const afterRestart = await (await request('/pro', null, 'GET')).json();
+  assert.equal(afterRestart.welcomeGiftAvailable, false);
+  assert.equal(afterRestart.coins, 150);
+  assert.equal(afterRestart.streakFreezes, 1);
+  assert.equal((await request('/pro/welcome-gift', { themeId: 'unknown' })).status, 400);
+});
+
+test('legacy accounts cannot enable a welcome gift through profile input', async () => {
+  await account('a', { coins: 75, starterCoinsGrantedAt: new Date() });
+  await request('/user/onboarding', { welcomeGiftEligible: true, welcomeGiftClaimedAt: null });
+  assert.equal((await request('/pro/welcome-gift', { themeId: 'ice' })).status, 409);
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 75);
+});
+
+test('500-coin Pro purchase is not refunded by monthly benefits and stays once per month', async () => {
+  await account('a', { coins: 500, starterCoinsGrantedAt: new Date() });
+  const purchase = await request('/coins/buy', { item: 'proWeek', requestId: 'pro_week_new_500' });
+  assert.equal(purchase.status, 200);
+  await Promise.all(Array.from({ length: 8 }, () => request('/pro', null, 'GET')));
+  const profile = await UserOnboarding.findOne({ uid: 'a' });
+  assert.equal(profile.coins, 0);
+  assert.equal(profile.streakFreezes, 20);
+  assert.equal(profile.proSource, 'coins');
+  assert.ok(Math.abs(profile.proExpiresAt.getTime() - Date.now() - 7 * 86400000) < 10000);
+  await UserOnboarding.updateOne({ uid: 'a' }, { $set: { proExpiresAt: new Date(Date.now() - 1000), coins: 500 } });
+  assert.equal((await request('/coins/buy', { item: 'proWeek', requestId: 'another_pro_week_500' })).status, 409);
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 500);
+});
+
+test('invite Pro gets freeze benefits but no monthly coin bonus', async () => {
+  await account('a', { proPlan: 'monthly', proSource: 'invites', proExpiresAt: new Date(Date.now() + 86400000), starterCoinsGrantedAt: new Date() });
+  await Promise.all(Array.from({ length: 5 }, () => request('/pro', null, 'GET')));
+  const profile = await UserOnboarding.findOne({ uid: 'a' });
+  assert.equal(profile.coins, 0);
+  assert.equal(profile.streakFreezes, 20);
+});
+
+test('paid Pro receives coins independently of the freeze refill, once per calendar month', async () => {
+  await account('a', { proPlan: 'monthly', proSource: 'store', proExpiresAt: new Date(Date.now() + 86400000), freezesRefilledAt: new Date(), starterCoinsGrantedAt: new Date() });
+  await Promise.all(Array.from({ length: 8 }, () => request('/pro', null, 'GET')));
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 500);
+  await UserOnboarding.updateOne({ uid: 'a' }, { $set: { proCoinsGrantedAt: new Date(Date.UTC(2020, 0, 1)) } });
+  await Promise.all(Array.from({ length: 5 }, () => request('/pro', null, 'GET')));
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 1000);
+});
+
+test('existing paid Pro bonuses are not granted a second time during migration', async () => {
+  await account('a', { coins: 500, proPlan: 'monthly', proSource: 'store', proExpiresAt: new Date(Date.now() + 86400000), freezesRefilledAt: new Date(), starterCoinsGrantedAt: new Date() });
+  await UserOnboarding.collection.updateOne({ uid: 'a' }, { $unset: { proCoinsGrantedAt: '' } });
+  await Promise.all(Array.from({ length: 6 }, () => request('/pro', null, 'GET')));
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 500);
+});
+
+test('earned Pro still doubles both win and perfect-day rewards', async () => {
+  await account('a', { proPlan: 'monthly', proSource: 'coins', proExpiresAt: new Date(Date.now() + 86400000), dailyChallengeLimit: 3 });
+  for (let i = 0; i < 3; i++) await recordResult('a', result(i));
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 160);
+});
