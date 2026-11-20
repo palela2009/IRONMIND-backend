@@ -8,22 +8,29 @@ import { isProActive } from '../routes/proRoutes';
 import { challengeDay } from './challengeTime';
 
 const APPS = ['Instagram', 'YouTube', 'TikTok', 'Facebook', 'X (Twitter)', 'Reddit', 'Snapchat'];
+const REELS_EXIT_WINDOW_SECONDS = 15;
 
 export class ChallengeError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
 export function parseChallenge(body: any) {
-  const { targetApp, elapsedTime, wasSuccessful, timestamp } = body ?? {};
+  const { targetApp, challengeKind, elapsedTime, wasSuccessful, timestamp } = body ?? {};
   if (!APPS.includes(targetApp) || typeof wasSuccessful !== 'boolean' ||
       !Number.isFinite(elapsedTime) || elapsedTime < 0 || elapsedTime > 86400 ||
       !Number.isSafeInteger(timestamp) || timestamp < 1577836800000 || timestamp > Date.now() + 300000) {
     throw new ChallengeError(400, 'Invalid challenge result');
   }
-  if (wasSuccessful && elapsedTime >= 10) throw new ChallengeError(400, 'Successful challenges must finish within the challenge window');
+  if (challengeKind !== undefined && (challengeKind !== 'instagram_reels' || targetApp !== 'Instagram')) {
+    throw new ChallengeError(400, 'Invalid challenge kind for this app');
+  }
+  const isReels = challengeKind === 'instagram_reels';
+  if (wasSuccessful && (isReels ? elapsedTime > REELS_EXIT_WINDOW_SECONDS : elapsedTime >= 10)) {
+    throw new ChallengeError(400, 'Successful challenges must finish within the challenge window');
+  }
   const eventId = body.eventId ?? createHash('sha256').update(`${targetApp}:${timestamp}`).digest('hex');
   if (typeof eventId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(eventId)) throw new ChallengeError(400, 'Invalid event ID');
-  return { eventId, targetApp, elapsedTime, wasSuccessful, timestamp };
+  return { eventId, targetApp, challengeKind, elapsedTime, wasSuccessful, timestamp };
 }
 
 export async function recordResult(uid: string, body: unknown) {
@@ -42,8 +49,9 @@ export async function recordResult(uid: string, body: unknown) {
     const dayId = `${uid}:${challengeDay(input.timestamp, timeZone)}`;
     const settings = [...profile.challengeSettings].reverse().find((entry) => entry.effectiveAt.getTime() <= input.timestamp) ?? profile;
     const windowSeconds = ({ EASY: 10, INTERMEDIATE: 5, HARD: 3 } as Record<string, number>)[settings.difficultyLevel] ?? 10;
-    if (input.wasSuccessful && input.elapsedTime >= windowSeconds) throw new ChallengeError(422, 'Result exceeds your configured challenge window');
-    if (settings.targetApps.length && !settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
+    const isReels = input.challengeKind === 'instagram_reels';
+    if (!isReels && input.wasSuccessful && input.elapsedTime >= windowSeconds) throw new ChallengeError(422, 'Result exceeds your configured challenge window');
+    if ((isReels || settings.targetApps.length) && !settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
     const limit = [3, 5, 10].includes(settings.dailyChallengeLimit) ? settings.dailyChallengeLimit : 5;
     let day = await ChallengeDay.findById(dayId).session(session);
     if (!day) {
@@ -122,7 +130,7 @@ export async function progressFor(uid: string) {
   ]);
   return {
     stats: stats ?? { currentStreak: 0, longestStreak: 0, bestReactionTime: 0, totalChallenges: 0, successCount: 0, currentXP: 0, level: 1 },
-    history: history.map((r) => ({ id: r.eventId ?? String(r._id), targetApp: r.targetApp, elapsedTime: r.elapsedTime, wasSuccessful: r.wasSuccessful, timestamp: r.timestamp, counted: r.counted, freezeUsed: r.freezeUsed })),
+    history: history.map((r) => ({ id: r.eventId ?? String(r._id), targetApp: r.targetApp, challengeKind: r.challengeKind, elapsedTime: r.elapsedTime, wasSuccessful: r.wasSuccessful, timestamp: r.timestamp, counted: r.counted, freezeUsed: r.freezeUsed })),
     streakFreezes: profile?.streakFreezes ?? 0,
     coins: profile?.coins ?? 0,
     timeZone: profile?.challengeTimeZone ?? 'UTC',

@@ -10,7 +10,7 @@ const { Duel } = require('../dist/models/Duel');
 const { ShopPurchase } = require('../dist/models/ShopPurchase');
 const { PRO_WEEK_PRICE } = require('../dist/constants/cosmetics');
 const { challengeDay } = require('../dist/services/challengeTime');
-const { recordResult, reclaimResult } = require('../dist/services/challenges');
+const { recordResult, reclaimResult, progressFor } = require('../dist/services/challenges');
 const { acceptDuel, cancelDuel, settleDuel } = require('../dist/services/duelTransactions');
 const { verifiedEmailFrom, isOwner } = require('../dist/services/identity');
 const { isProActive } = require('../dist/routes/proRoutes');
@@ -94,6 +94,35 @@ test('concurrent retries grant one challenge win and one reward', async () => {
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 10);
   await recordResult('a', { ...event, eventId: 'different_id_123' });
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 10);
+});
+
+test('Instagram Reels wins accept the 15-second window and preserve exit time in history', async () => {
+  await account('a', { targetApps: ['Instagram'], difficultyLevel: 'HARD' });
+  const reels = (index, elapsedTime, success = true) => ({
+    ...result(index, success), targetApp: 'Instagram', challengeKind: 'instagram_reels', elapsedTime,
+  });
+  const win = reels(1, 12.34);
+  await recordResult('a', win);
+  await recordResult('a', win);
+  let progress = await progressFor('a');
+  assert.equal(progress.stats.currentStreak, 1);
+  assert.equal(progress.history.length, 1);
+  assert.equal(progress.history[0].elapsedTime, 12.34);
+  assert.equal(progress.history[0].wasSuccessful, true);
+  assert.equal(progress.history[0].challengeKind, 'instagram_reels');
+
+  await recordResult('a', reels(2, 15));
+  progress = await progressFor('a');
+  assert.equal(progress.stats.currentStreak, 2);
+  assert.equal(progress.history[0].elapsedTime, 15);
+
+  await assert.rejects(() => recordResult('a', reels(3, 15.01)), { status: 400 });
+  await assert.rejects(() => recordResult('a', { ...result(4), targetApp: 'Instagram', elapsedTime: 4 }), { status: 422 });
+  await assert.rejects(() => recordResult('a', { ...result(5), challengeKind: 'instagram_reels' }), { status: 400 });
+  await recordResult('a', reels(6, 20, false));
+  progress = await progressFor('a');
+  assert.equal(progress.stats.currentStreak, 0);
+  assert.equal(progress.history[0].wasSuccessful, false);
 });
 
 test('daily challenges and perfect-day reward have a single shared limit', async () => {

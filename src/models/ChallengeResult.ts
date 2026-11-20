@@ -8,6 +8,7 @@ export interface IChallengeResult extends Document {
   coinsGranted: number;
   reclaimed: boolean;
   targetApp: string;
+  challengeKind?: 'instagram_reels';
   elapsedTime: number;
   wasSuccessful: boolean;
   timestamp: number;
@@ -21,6 +22,7 @@ const challengeResultSchema = new Schema<IChallengeResult>({
   coinsGranted: { type: Number, default: 0 },
   reclaimed: { type: Boolean, default: false },
   targetApp: { type: String, required: true },
+  challengeKind: { type: String, enum: ['instagram_reels'] },
   elapsedTime: { type: Number, required: true },
   wasSuccessful: { type: Boolean, required: true },
   timestamp: { type: Number, required: true },
