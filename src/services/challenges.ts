@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { createHash } from 'crypto';
-import { ChallengeResult } from '../models/ChallengeResult';
+import { ChallengeResult, SCROLL_CHALLENGE_APPS, type ScrollChallengeKind } from '../models/ChallengeResult';
 import { ChallengeDay } from '../models/ChallengeDay';
 import { UserStats } from '../models/UserStats';
 import { UserOnboarding } from '../models/UserOnboarding';
@@ -8,7 +8,7 @@ import { isProActive } from '../routes/proRoutes';
 import { challengeDay } from './challengeTime';
 
 const APPS = ['Instagram', 'YouTube', 'TikTok', 'Facebook', 'X (Twitter)', 'Reddit', 'Snapchat'];
-const REELS_EXIT_WINDOW_SECONDS = 15;
+const SCROLL_EXIT_WINDOW_SECONDS = 15;
 
 export class ChallengeError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -21,16 +21,17 @@ export function parseChallenge(body: any) {
       !Number.isSafeInteger(timestamp) || timestamp < 1577836800000 || timestamp > Date.now() + 300000) {
     throw new ChallengeError(400, 'Invalid challenge result');
   }
-  if (challengeKind !== undefined && (challengeKind !== 'instagram_reels' || targetApp !== 'Instagram')) {
+  if (challengeKind !== undefined && (typeof challengeKind !== 'string' ||
+      !Object.hasOwn(SCROLL_CHALLENGE_APPS, challengeKind) || SCROLL_CHALLENGE_APPS[challengeKind as ScrollChallengeKind] !== targetApp)) {
     throw new ChallengeError(400, 'Invalid challenge kind for this app');
   }
-  const isReels = challengeKind === 'instagram_reels';
-  if (wasSuccessful && (isReels ? elapsedTime > REELS_EXIT_WINDOW_SECONDS : elapsedTime >= 10)) {
+  const isScrollChallenge = challengeKind !== undefined;
+  if (wasSuccessful && (isScrollChallenge ? elapsedTime > SCROLL_EXIT_WINDOW_SECONDS : elapsedTime >= 10)) {
     throw new ChallengeError(400, 'Successful challenges must finish within the challenge window');
   }
   const eventId = body.eventId ?? createHash('sha256').update(`${targetApp}:${timestamp}`).digest('hex');
   if (typeof eventId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(eventId)) throw new ChallengeError(400, 'Invalid event ID');
-  return { eventId, targetApp, challengeKind, elapsedTime, wasSuccessful, timestamp };
+  return { eventId, targetApp, challengeKind: challengeKind as ScrollChallengeKind | undefined, elapsedTime, wasSuccessful, timestamp };
 }
 
 export async function recordResult(uid: string, body: unknown) {
@@ -49,9 +50,9 @@ export async function recordResult(uid: string, body: unknown) {
     const dayId = `${uid}:${challengeDay(input.timestamp, timeZone)}`;
     const settings = [...profile.challengeSettings].reverse().find((entry) => entry.effectiveAt.getTime() <= input.timestamp) ?? profile;
     const windowSeconds = ({ EASY: 10, INTERMEDIATE: 5, HARD: 3 } as Record<string, number>)[settings.difficultyLevel] ?? 10;
-    const isReels = input.challengeKind === 'instagram_reels';
-    if (!isReels && input.wasSuccessful && input.elapsedTime >= windowSeconds) throw new ChallengeError(422, 'Result exceeds your configured challenge window');
-    if ((isReels || settings.targetApps.length) && !settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
+    const isScrollChallenge = input.challengeKind !== undefined;
+    if (!isScrollChallenge && input.wasSuccessful && input.elapsedTime >= windowSeconds) throw new ChallengeError(422, 'Result exceeds your configured challenge window');
+    if ((isScrollChallenge || settings.targetApps.length) && !settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
     const limit = [3, 5, 10].includes(settings.dailyChallengeLimit) ? settings.dailyChallengeLimit : 5;
     let day = await ChallengeDay.findById(dayId).session(session);
     if (!day) {

@@ -1,5 +1,14 @@
 import { Schema, model, Document } from 'mongoose';
 
+export const SCROLL_CHALLENGE_APPS = {
+  instagram_reels: 'Instagram',
+  facebook_reels: 'Facebook',
+  tiktok_feed: 'TikTok',
+  youtube_shorts: 'YouTube',
+} as const;
+
+export type ScrollChallengeKind = keyof typeof SCROLL_CHALLENGE_APPS;
+
 export interface IChallengeResult extends Document {
   userId: string;
   eventId?: string;
@@ -8,7 +17,7 @@ export interface IChallengeResult extends Document {
   coinsGranted: number;
   reclaimed: boolean;
   targetApp: string;
-  challengeKind?: 'instagram_reels';
+  challengeKind?: ScrollChallengeKind;
   elapsedTime: number;
   wasSuccessful: boolean;
   timestamp: number;
@@ -22,7 +31,7 @@ const challengeResultSchema = new Schema<IChallengeResult>({
   coinsGranted: { type: Number, default: 0 },
   reclaimed: { type: Boolean, default: false },
   targetApp: { type: String, required: true },
-  challengeKind: { type: String, enum: ['instagram_reels'] },
+  challengeKind: { type: String, enum: Object.keys(SCROLL_CHALLENGE_APPS) },
   elapsedTime: { type: Number, required: true },
   wasSuccessful: { type: Boolean, required: true },
   timestamp: { type: Number, required: true },
