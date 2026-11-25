@@ -22,9 +22,16 @@ const deletedUsers = new Set();
 const adminPath = require.resolve('../dist/config/firebaseAdmin');
 require.cache[adminPath] = { id: adminPath, filename: adminPath, loaded: true, exports: { __esModule: true, default: { auth: () => ({ verifyIdToken: async (_token, checkRevoked) => { if (checkRevoked && revoked) throw Object.assign(new Error('Revoked'), { code: 'auth/id-token-revoked' }); if (checkRevoked && deletedUsers.has(claims.uid)) throw Object.assign(new Error('Deleted user'), { code: 'auth/user-not-found' }); return claims; }, deleteUser: async (uid) => { if (deleteFailure) throw new Error('Temporary Firebase failure'); if (deletedUsers.has(uid)) throw Object.assign(new Error('Not found'), { code: 'auth/user-not-found' }); deletedUsers.add(uid); } }) } } };
 const { verifyAuth } = require('../dist/middleware/verifyAuth');
+const { verifySyncToken } = require('../dist/middleware/security');
 const userRoutes = require('../dist/routes/userRoutes').default;
 const proRoutes = require('../dist/routes/proRoutes').default;
 const coinRoutes = require('../dist/routes/coinRoutes').default;
+const publicRoutes = require('../dist/routes/publicRoutes').default;
+const screenTimeRoutes = require('../dist/routes/screenTimeRoutes').default;
+const friendRoutes = require('../dist/routes/friendRoutes').default;
+const syncRoutes = require('../dist/routes/syncRoutes').default;
+const { ScreenTime } = require('../dist/models/ScreenTime');
+const { FriendRequest } = require('../dist/models/FriendRequest');
 
 let db;
 let server;
@@ -32,18 +39,22 @@ let origin;
 before(async () => {
   db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, binary: { version: '7.0.24' } });
   await mongoose.connect(db.getUri());
-  await Promise.all([UserOnboarding.init(), UserStats.init(), ChallengeResult.init(), ChallengeDay.init(), Duel.init(), ShopPurchase.init()]);
+  await Promise.all([UserOnboarding.init(), UserStats.init(), ChallengeResult.init(), ChallengeDay.init(), Duel.init(), ShopPurchase.init(), ScreenTime.init(), FriendRequest.init()]);
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' }));
+  app.use('/public', publicRoutes);
+  app.use('/sync', verifySyncToken, syncRoutes);
   app.use('/user', verifyAuth, userRoutes);
   app.use('/pro', verifyAuth, proRoutes);
   app.use('/coins', verifyAuth, coinRoutes);
+  app.use('/screentime', verifyAuth, screenTimeRoutes);
+  app.use('/friends', verifyAuth, friendRoutes);
   server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
 });
 after(async () => { if (server) await new Promise((resolve) => server.close(resolve)); await mongoose.disconnect(); if (db) await db.stop(); });
-beforeEach(async () => { deleteFailure = false; revoked = false; deletedUsers.clear(); claims = { uid: 'a', email: 'user@example.com', email_verified: true }; await Promise.all([UserOnboarding.deleteMany({}), UserStats.deleteMany({}), ChallengeResult.deleteMany({}), ChallengeDay.deleteMany({}), Duel.deleteMany({}), ShopPurchase.deleteMany({})]); });
+beforeEach(async () => { deleteFailure = false; revoked = false; deletedUsers.clear(); claims = { uid: 'a', email: 'user@example.com', email_verified: true }; await Promise.all([UserOnboarding.deleteMany({}), UserStats.deleteMany({}), ChallengeResult.deleteMany({}), ChallengeDay.deleteMany({}), Duel.deleteMany({}), ShopPurchase.deleteMany({}), ScreenTime.deleteMany({}), FriendRequest.deleteMany({})]); });
 
 const account = (uid, extra = {}) => UserOnboarding.create({ uid, targetApps: ['YouTube'], createdAt: new Date(Date.now() - 86400000 * 30), ...extra });
 const result = (index, success = true) => ({ eventId: `event_${String(index).padStart(8, '0')}`, targetApp: 'YouTube', elapsedTime: success ? 2 : 20, wasSuccessful: success, timestamp: Date.now() - 3600000 + index * 1000 });
@@ -176,15 +187,17 @@ test('reclaim charges once and restores the recorded lost streak', async () => {
   assert.equal((await UserStats.findOne({ userId: 'a' })).currentStreak, 7);
 });
 
-test('concurrent duel acceptance and cancellation charge and refund exactly once', async () => {
+test('concurrent duel acceptance charges once and active cancellation forfeits pot to opponent once', async () => {
   await account('a', { coins: 500 }); await account('b', { coins: 500 });
   const duel = await Duel.create({ fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100 });
   await Promise.all(Array.from({ length: 8 }, () => acceptDuel(String(duel._id), 'b')));
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 400);
   assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 400);
   await Promise.all(Array.from({ length: 8 }, () => cancelDuel(String(duel._id), 'a')));
-  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 500);
-  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 500);
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 400);
+  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 600);
+  assert.equal((await Duel.findById(duel._id)).winnerUid, 'b');
+  assert.equal((await Duel.findById(duel._id)).status, 'completed');
 });
 
 test('insufficient opponent balance rolls back challenger charge', async () => {
@@ -206,12 +219,24 @@ test('concurrent settlement pays one pot, and stale interim data cannot win', as
   assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 400);
 });
 
-test('missing final usage refunds once after the grace period', async () => {
+test('missing final usage refunds once after the 4-hour grace period, and single reporter wins by forfeit', async () => {
   await account('a', { coins: 400 }); await account('b', { coins: 400 });
-  const duel = await Duel.create({ fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100, status: 'active', endAt: new Date(Date.now() - 700000) });
-  await Promise.all(Array.from({ length: 8 }, () => settleDuel(String(duel._id))));
-  assert.equal((await Duel.findById(duel._id)).status, 'void');
+  const pastGrace = new Date(Date.now() - (4 * 3600000 + 60000));
+  const duelVoid = await Duel.create({ fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100, status: 'active', endAt: pastGrace });
+  await Promise.all(Array.from({ length: 8 }, () => settleDuel(String(duelVoid._id))));
+  assert.equal((await Duel.findById(duelVoid._id)).status, 'void');
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 500);
+  assert.equal((await UserOnboarding.findOne({ uid: 'b' })).coins, 500);
+
+  const duelForfeit = await Duel.create({
+    fromUid: 'a', toUid: 'b', app: 'YouTube', stake: 100, status: 'active',
+    endAt: pastGrace, fromMinutes: 12, fromReportedAt: new Date(pastGrace.getTime() + 60000),
+  });
+  await Promise.all(Array.from({ length: 6 }, () => settleDuel(String(duelForfeit._id))));
+  const settled = await Duel.findById(duelForfeit._id);
+  assert.equal(settled.status, 'completed');
+  assert.equal(settled.winnerUid, 'a');
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 700);
 });
 
 test('concurrent cosmetic purchases debit once even with different request IDs', async () => {
@@ -395,4 +420,89 @@ test('earned Pro still doubles both win and perfect-day rewards', async () => {
   await account('a', { proPlan: 'monthly', proSource: 'coins', proExpiresAt: new Date(Date.now() + 86400000), dailyChallengeLimit: 3 });
   for (let i = 0; i < 3; i++) await recordResult('a', result(i));
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 160);
+});
+
+test('photo upload blocks HTML/SVG XSS and serves valid PNG safely', async () => {
+  await account('a');
+  const htmlRes = await request('/user/photo', { imageBase64: Buffer.from('<script>alert(1)</script>').toString('base64'), contentType: 'text/html' });
+  assert.equal(htmlRes.status, 400);
+  const fakePngRes = await request('/user/photo', { imageBase64: Buffer.from('<svg onload=alert(1)>').toString('base64'), contentType: 'image/png' });
+  assert.equal(fakePngRes.status, 400);
+  const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+  const okRes = await request('/user/photo', { imageBase64: validPng.toString('base64'), contentType: 'image/png' });
+  assert.equal(okRes.status, 200);
+  const pubRes = await fetch(`${origin}/public/photo/a`);
+  assert.equal(pubRes.status, 200);
+  assert.equal(pubRes.headers.get('content-type'), 'image/png');
+  assert.equal(pubRes.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(pubRes.headers.get('content-security-policy') || '', /sandbox/);
+});
+
+test('free users can equip default and welcome gift theme but cannot bypass paywall for other paid themes', async () => {
+  await account('a', { unlockedThemes: ['ice'] });
+  assert.equal((await request('/pro/theme', { themeId: 'ice' })).status, 200);
+  assert.equal((await request('/pro/theme', { themeId: 'default' })).status, 200);
+  assert.equal((await request('/pro/theme', { themeId: 'cyberpunk' })).status, 403);
+  assert.equal((await request('/pro/theme', { themeId: 'not-a-theme' })).status, 400);
+});
+
+test('screen time rejects negative minutes and invalid dates', async () => {
+  await account('a');
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal((await request('/screentime', { date: today, apps: [{ app: 'YouTube', minutes: -5 }] })).status, 400);
+  assert.equal((await request('/screentime', { date: '2026-99-99', apps: [{ app: 'YouTube', minutes: 10 }] })).status, 400);
+  assert.equal((await request('/screentime', { date: today, apps: [{ app: 'YouTube', minutes: 20 }] })).status, 200);
+});
+
+test('friends leaderboard hides emails and ranks synced friends above unsynced friends', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  await account('a', { displayName: 'Me', email: 'me@example.com' });
+  await account('b', { email: 'secret@example.com', targetApps: ['YouTube'] });
+  await account('c', { displayName: 'Synced', email: 'c@example.com', targetApps: ['YouTube'] });
+  await FriendRequest.create({ fromUid: 'a', toUid: 'b', status: 'accepted' });
+  await FriendRequest.create({ fromUid: 'a', toUid: 'c', status: 'accepted' });
+  await ScreenTime.create({ userId: 'c', date: today, apps: [{ app: 'YouTube', minutes: 25 }] });
+  const res = await request(`/friends?date=${today}`, null, 'GET');
+  assert.equal(res.status, 200);
+  const list = await res.json();
+  assert.equal(list[0].uid, 'c');
+  assert.equal(list[0].hasTodayData, true);
+  assert.equal(list[1].uid, 'b');
+  assert.equal(list[1].hasTodayData, false);
+  assert.equal(list[1].displayName, 'IRONMIND User');
+  assert.ok(!JSON.stringify(list).includes('secret@example.com'));
+});
+
+test('background sync token syncs screen time and settles ended duels automatically without Firebase auth', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  await account('a', { coins: 400 });
+  await account('b', { coins: 400 });
+  const tokenRes = await request('/user/sync-token', {});
+  assert.equal(tokenRes.status, 200);
+  const { syncToken } = await tokenRes.json();
+
+  const end = new Date(Date.now() - 5000);
+  const duel = await Duel.create({
+    fromUid: 'a', toUid: 'b', app: 'YouTube', apps: ['YouTube'], stake: 100, status: 'active',
+    startAt: new Date(end.getTime() - 86400000), endAt: end,
+    toMinutes: 45, toReportedAt: new Date(),
+  });
+
+  const duelsRes = await fetch(`${origin}/sync/duels`, { headers: { Authorization: `Sync a:${syncToken}` } });
+  assert.equal(duelsRes.status, 200);
+  const { duels } = await duelsRes.json();
+  assert.equal(duels.length, 1);
+  assert.equal(duels[0].id, String(duel._id));
+
+  const postRes = await fetch(`${origin}/sync/usage`, {
+    method: 'POST',
+    headers: { Authorization: `Sync a:${syncToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date: today, apps: [{ app: 'YouTube', minutes: 12 }], duelReports: [{ id: String(duel._id), minutes: 12 }] }),
+  });
+  assert.equal(postRes.status, 200);
+  const settled = await Duel.findById(duel._id);
+  assert.equal(settled.status, 'completed');
+  assert.equal(settled.winnerUid, 'a');
+  assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 600);
+  assert.ok(await ScreenTime.findOne({ userId: 'a', date: today }));
 });

@@ -14,6 +14,7 @@ export interface IUserOnboarding extends Document {
   photoData?: Buffer;
   photoContentType?: string;
   pushToken?: string | null;
+  usageSyncTokenHash?: string | null;
   targetApps: string[];
   goals: string[];
   difficultyLevel: string;
@@ -65,6 +66,7 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   photoData: { type: Buffer, select: false },
   photoContentType: { type: String },
   pushToken: { type: String, default: null },
+  usageSyncTokenHash: { type: String, default: null, select: false },
   targetApps: { type: [String], default: [] },
   goals: { type: [String], default: [] },
   difficultyLevel: { type: String, enum: ['EASY', 'INTERMEDIATE', 'HARD'], default: 'EASY' },
@@ -115,5 +117,7 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
 
   createdAt: { type: Date, default: Date.now }
 });
+
+userOnboardingSchema.index({ pushToken: 1 }, { partialFilterExpression: { pushToken: { $type: 'string' } } });
 
 export const UserOnboarding = model<IUserOnboarding>('UserOnboarding', userOnboardingSchema);

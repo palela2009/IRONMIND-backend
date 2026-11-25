@@ -21,26 +21,38 @@ export const verifyAuth = async (req: Request, res: Response, next: NextFunction
   }
 
   const idToken = authHeader.slice('Bearer '.length);
+  const pathOnly = req.originalUrl.split('?')[0];
+  const deleting = req.method === 'DELETE' && /^\/(?:api\/)?user\/account\/?$/.test(pathOnly);
 
-  const deleting = req.method === 'DELETE' && req.originalUrl.split('?')[0].endsWith('/account');
   try {
     let decoded;
-    try { decoded = await admin.auth().verifyIdToken(idToken, true); }
-    catch (error) {
+    try {
+      decoded = await admin.auth().verifyIdToken(idToken, true);
+    } catch (error) {
       if (!deleting || (error as { code?: string }).code !== 'auth/user-not-found') throw error;
       decoded = await admin.auth().verifyIdToken(idToken);
     }
     req.uid = decoded.uid;
     req.email = normalizedEmail(decoded.email);
     req.verifiedEmail = verifiedEmailFrom(decoded);
-
   } catch (error) {
     console.error('Auth token verification failed:', error);
     return res.status(401).json({ message: 'Invalid or expired auth token' });
   }
+
   try {
-    const profile = await UserOnboarding.findOneAndUpdate({ uid: req.uid }, { $set: { email: req.email, verifiedEmail: req.verifiedEmail } }, { returnDocument: 'after' });
-    if (profile?.deletionRequestedAt && !deleting) return res.status(409).json({ message: 'Finish deleting this account before continuing' });
+    const profile = await UserOnboarding.findOne({ uid: req.uid })
+      .select('email verifiedEmail deletionRequestedAt')
+      .lean();
+    if (profile?.deletionRequestedAt && !deleting) {
+      return res.status(409).json({ message: 'Finish deleting this account before continuing' });
+    }
+    if (profile && (profile.email !== req.email || profile.verifiedEmail !== req.verifiedEmail)) {
+      await UserOnboarding.updateOne(
+        { uid: req.uid },
+        { $set: { email: req.email, verifiedEmail: req.verifiedEmail } }
+      );
+    }
     next();
   } catch {
     return res.status(503).json({ message: 'Account service unavailable. Please retry.' });

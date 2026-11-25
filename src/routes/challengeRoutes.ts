@@ -3,14 +3,19 @@ import { ChallengeResult } from '../models/ChallengeResult';
 import { sendChallengeNotification } from '../services/notifications';
 import { recordResult, reclaimResult, progressFor, ChallengeError } from '../services/challenges';
 import { notifyOvertakenFriends } from './statsRoutes';
+import { strictActionLimiter } from '../middleware/security';
+
 const router = Router();
 
-router.post('/notify', async (req: Request, res: Response): Promise<any> => {
+router.post('/notify', strictActionLimiter, async (req: Request, res: Response): Promise<any> => {
   try {
     const userId = req.uid;
-    const { targetApp, test } = req.body;
+    const { targetApp, test } = req.body ?? {};
+    if (typeof targetApp !== 'string' || !targetApp.trim() || targetApp.length > 64) {
+      return res.status(400).json({ message: 'Valid targetApp is required' });
+    }
 
-    await sendChallengeNotification(userId, targetApp, !!test);
+    await sendChallengeNotification(userId, targetApp.trim(), !!test);
 
     return res.status(200).json({ success: true });
   } catch (error) {
@@ -22,16 +27,20 @@ router.post('/notify', async (req: Request, res: Response): Promise<any> => {
 router.get('/results', async (req: Request, res: Response): Promise<any> => {
   try {
     const results = await ChallengeResult.find({ userId: req.uid })
-      .sort({ timestamp: -1 })
-      .limit(200);
+      .sort({ timestamp: -1, _id: -1 })
+      .limit(200)
+      .lean();
 
     return res.status(200).json(
       results.map((r) => ({
         id: r.eventId ?? String(r._id),
         targetApp: r.targetApp,
+        challengeKind: r.challengeKind,
         elapsedTime: r.elapsedTime,
         timestamp: r.timestamp,
         wasSuccessful: r.wasSuccessful,
+        counted: r.counted,
+        freezeUsed: r.freezeUsed,
       }))
     );
   } catch (error) {
@@ -48,7 +57,9 @@ router.get('/progress', async (req: Request, res: Response) => {
 router.post('/result', async (req: Request, res: Response) => {
   try {
     const result = await recordResult(req.uid, req.body);
-    if (!result.duplicate && result.beforeStreak !== undefined && result.afterStreak !== undefined) void notifyOvertakenFriends(req.uid, result.beforeStreak, result.afterStreak).catch(() => {});
+    if (!result.duplicate && result.beforeStreak !== undefined && result.afterStreak !== undefined) {
+      void notifyOvertakenFriends(req.uid, result.beforeStreak, result.afterStreak).catch(() => {});
+    }
     res.json({ ...result, ...(await progressFor(req.uid)) });
   } catch (error) {
     const status = error instanceof ChallengeError ? error.status : 503;

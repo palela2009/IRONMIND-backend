@@ -9,6 +9,7 @@ import { challengeDay } from './challengeTime';
 
 const APPS = ['Instagram', 'YouTube', 'TikTok', 'Facebook', 'X (Twitter)', 'Reddit', 'Snapchat'];
 const SCROLL_EXIT_WINDOW_SECONDS = 15;
+const MAX_OFFLINE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class ChallengeError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -43,6 +44,7 @@ export async function recordResult(uid: string, body: unknown) {
     if (duplicate) return { duplicate: true, result: duplicate };
 
     if (input.timestamp < profile.createdAt.getTime() - 300000) throw new ChallengeError(400, 'Challenge predates this account');
+    if (input.timestamp < Date.now() - MAX_OFFLINE_AGE_MS) throw new ChallengeError(400, 'Challenge is too old to sync');
     const sameEvent = await ChallengeResult.findOne({ userId: uid, targetApp: input.targetApp, timestamp: input.timestamp }).session(session);
     if (sameEvent) return { duplicate: true, result: sameEvent };
 
@@ -52,7 +54,7 @@ export async function recordResult(uid: string, body: unknown) {
     const windowSeconds = ({ EASY: 10, INTERMEDIATE: 5, HARD: 3 } as Record<string, number>)[settings.difficultyLevel] ?? 10;
     const isScrollChallenge = input.challengeKind !== undefined;
     if (!isScrollChallenge && input.wasSuccessful && input.elapsedTime >= windowSeconds) throw new ChallengeError(422, 'Result exceeds your configured challenge window');
-    if ((isScrollChallenge || settings.targetApps.length) && !settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
+    if (!settings.targetApps.includes(input.targetApp)) throw new ChallengeError(422, 'This app is not selected for challenges');
     const limit = [3, 5, 10].includes(settings.dailyChallengeLimit) ? settings.dailyChallengeLimit : 5;
     let day = await ChallengeDay.findById(dayId).session(session);
     if (!day) {
@@ -63,6 +65,9 @@ export async function recordResult(uid: string, body: unknown) {
     let stats = await UserStats.findOne({ userId: uid }).session(session);
     if (!stats) stats = new UserStats({ userId: uid });
 
+    const latestRecorded = await ChallengeResult.findOne({ userId: uid, counted: { $ne: false } }).sort({ timestamp: -1 }).select('timestamp').session(session);
+    const isOutOfOrder = !!latestRecorded && input.timestamp < latestRecorded.timestamp;
+
     const beforeStreak = stats.currentStreak;
     const counted = day.count < day.limit;
     let freezeUsed = false;
@@ -72,8 +77,10 @@ export async function recordResult(uid: string, body: unknown) {
       if (input.wasSuccessful) day.wins += 1;
       freezeUsed = !input.wasSuccessful && stats.currentStreak > 0 && profile.streakFreezes > 0;
       if (freezeUsed) profile.streakFreezes -= 1;
-      stats.lostStreak = !input.wasSuccessful && !freezeUsed ? stats.currentStreak : 0;
-      stats.reclaimableEventId = stats.lostStreak > 0 ? input.eventId : null;
+      if (!isOutOfOrder) {
+        stats.lostStreak = !input.wasSuccessful && !freezeUsed ? stats.currentStreak : 0;
+        stats.reclaimableEventId = stats.lostStreak > 0 ? input.eventId : null;
+      }
       const xp = input.wasSuccessful ? 50 + (stats.currentStreak >= 5 ? 10 : 0) : 0;
       stats.currentStreak = input.wasSuccessful ? stats.currentStreak + 1 : freezeUsed ? stats.currentStreak : 0;
       stats.longestStreak = Math.max(stats.longestStreak, stats.currentStreak);
@@ -105,19 +112,26 @@ export async function recordResult(uid: string, body: unknown) {
 export async function reclaimResult(uid: string, eventId: unknown) {
   if (typeof eventId !== 'string') throw new ChallengeError(400, 'Challenge ID is required');
   return mongoose.connection.transaction(async (session) => {
+    const profile = await UserOnboarding.findOneAndUpdate(
+      { uid, deletionRequestedAt: null },
+      { $inc: { progressRevision: 1 } },
+      { returnDocument: 'after', session }
+    );
+    if (!profile) throw new ChallengeError(409, 'Account is unavailable');
     const result = await ChallengeResult.findOne({ userId: uid, eventId }).session(session);
     if (!result) throw new ChallengeError(404, 'Sync this challenge before reclaiming');
     if (result.reclaimed) return;
     const stats = await UserStats.findOne({ userId: uid }).session(session);
     if (!stats || stats.reclaimableEventId !== eventId || stats.lostStreak <= 0) throw new ChallengeError(409, 'This streak can no longer be reclaimed');
-    const paid = await UserOnboarding.findOneAndUpdate({ uid, coins: { $gte: 200 } }, { $inc: { coins: -200 } }, { session });
-    if (!paid) throw new ChallengeError(409, 'Not enough coins');
+    if (profile.coins < 200) throw new ChallengeError(409, 'Not enough coins');
+    profile.coins -= 200;
     stats.currentStreak = stats.lostStreak;
     stats.longestStreak = Math.max(stats.longestStreak, stats.currentStreak);
     stats.lostStreak = 0;
     stats.reclaimableEventId = null;
     stats.updatedAt = new Date();
     result.reclaimed = true;
+    await profile.save({ session });
     await stats.save({ session });
     await result.save({ session });
   });

@@ -15,5 +15,7 @@ const friendRequestSchema = new Schema<IFriendRequest>({
 });
 
 friendRequestSchema.index({ fromUid: 1, toUid: 1 }, { unique: true });
+friendRequestSchema.index({ toUid: 1, status: 1, createdAt: -1 });
+friendRequestSchema.index({ fromUid: 1, status: 1 });
 
 export const FriendRequest = model<IFriendRequest>('FriendRequest', friendRequestSchema);

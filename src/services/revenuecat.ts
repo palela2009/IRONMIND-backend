@@ -9,20 +9,28 @@ type Plan = 'monthly' | 'annual' | 'lifetime';
 
 interface RcEntitlement {
   expires_date: string | null;
-  product_identifier: string;
+  product_identifier?: string;
 }
 
 export const revenueCatConfigured = (): boolean => !!process.env.REVENUECAT_SECRET_KEY;
 
-const planFor = (productId: string): Plan => {
-  if (productId.includes('lifetime')) return 'lifetime';
-  if (productId.includes('annual')) return 'annual';
+const planFor = (productId: string, noExpiry: boolean): Plan => {
+  const lower = productId.toLowerCase();
+  if (noExpiry || lower.includes('lifetime')) return 'lifetime';
+  if (lower.includes('annual') || lower.includes('year')) return 'annual';
   return 'monthly';
+};
+
+const sameCalendarMonth = (d: Date | null | undefined): boolean => {
+  if (!d) return false;
+  const now = new Date();
+  return d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth();
 };
 
 async function fetchEntitlement(uid: string): Promise<RcEntitlement | null> {
   const res = await fetch(`${API}/${encodeURIComponent(uid)}`, {
     headers: { Authorization: `Bearer ${process.env.REVENUECAT_SECRET_KEY}` },
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`RevenueCat responded ${res.status}`);
   const body = (await res.json()) as { subscriber?: { entitlements?: Record<string, RcEntitlement> } };
@@ -37,11 +45,11 @@ export async function syncStorePurchase(uid: string) {
   const active = !!ent && (expiresAt === null || expiresAt.getTime() > Date.now());
 
   if (active && ent) {
-    const plan = planFor(ent.product_identifier);
+    const plan = planFor(ent.product_identifier ?? '', expiresAt === null);
     const current = await UserOnboarding.findOne({ uid });
     if (isOwner(current?.verifiedEmail)) return current;
 
-    const newlyPro = current?.proSource !== 'store';
+    const shouldRefillFreezes = current?.proSource !== 'store' && !sameCalendarMonth(current?.freezesRefilledAt);
     return UserOnboarding.findOneAndUpdate(
       { uid },
       {
@@ -49,17 +57,18 @@ export async function syncStorePurchase(uid: string) {
           proPlan: plan,
           proExpiresAt: plan === 'lifetime' ? null : expiresAt,
           proSource: 'store',
-          ...(newlyPro ? { freezesRefilledAt: new Date() } : {}),
+          ...(shouldRefillFreezes ? { freezesRefilledAt: new Date() } : {}),
         },
-        ...(newlyPro ? { $max: { streakFreezes: PRO_MONTHLY_FREEZES } } : {}),
+        ...(shouldRefillFreezes ? { $max: { streakFreezes: PRO_MONTHLY_FREEZES } } : {}),
+        $setOnInsert: { welcomeGiftEligible: true },
       },
-      { new: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
   }
 
   return UserOnboarding.findOneAndUpdate(
     { uid, proSource: 'store' },
     { $set: { proPlan: null, proExpiresAt: null, proSource: null } },
-    { new: true }
+    { returnDocument: 'after' }
   ).then((doc) => doc ?? UserOnboarding.findOne({ uid }));
 }

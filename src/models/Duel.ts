@@ -50,7 +50,9 @@ const duelSchema = new Schema<IDuel>({
   createdAt: { type: Date, default: Date.now },
 });
 
-duelSchema.index({ fromUid: 1, status: 1 });
-duelSchema.index({ toUid: 1, status: 1 });
+duelSchema.index({ fromUid: 1, status: 1, endAt: 1 });
+duelSchema.index({ toUid: 1, status: 1, endAt: 1 });
+duelSchema.index({ fromUid: 1, createdAt: -1 });
+duelSchema.index({ toUid: 1, createdAt: -1 });
 
 export const Duel = model<IDuel>('Duel', duelSchema);

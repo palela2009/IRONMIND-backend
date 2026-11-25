@@ -1,9 +1,12 @@
+import { randomInt } from 'crypto';
 import { Router, Request, Response } from 'express';
+import { isValidObjectId } from 'mongoose';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { UserStats } from '../models/UserStats';
 import { FriendRequest } from '../models/FriendRequest';
 import { ScreenTime } from '../models/ScreenTime';
 import { isProActive, isOwner } from './proRoutes';
+import { isValidCalendarDate } from './screenTimeRoutes';
 import { sendPush } from '../services/notifications';
 import { attributeReferral, referralProgress } from '../services/referrals';
 import { deviceHashFor, rememberDevice } from '../services/device';
@@ -15,46 +18,54 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function generateCode(length = 6): string {
   let code = '';
   for (let i = 0; i < length; i++) {
-    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    code += CODE_CHARS[randomInt(0, CODE_CHARS.length)];
   }
   return code;
 }
 
-const isDateKey = (v: unknown): boolean => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-
 const shiftDateKey = (key: string, days: number): string => {
-  const d = new Date(`${key}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
 };
 
 const trackedMinutes = (apps: { app: string; minutes: number }[], tracked: string[]): number =>
   apps.filter((a) => tracked.includes(a.app)).reduce((sum, a) => sum + a.minutes, 0);
 
-function nameFor(profile?: { displayName?: string; email?: string } | null): string {
-  return profile?.displayName || profile?.email || 'Unknown';
+function nameFor(profile?: { displayName?: string } | null): string {
+  return profile?.displayName?.trim() || 'IRONMIND User';
 }
 
 router.get('/code', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
-    const user = await UserOnboarding.findOne({ uid });
+    let user = await UserOnboarding.findOne({ uid, deletionRequestedAt: null }).select('inviteCode').lean();
     if (!user) {
       return res.status(404).json({ message: 'Complete onboarding first' });
     }
 
     if (!user.inviteCode) {
-      let code = generateCode();
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const clash = await UserOnboarding.findOne({ inviteCode: code });
-        if (!clash) break;
-        code = generateCode();
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const candidate = generateCode();
+        try {
+          const updated = await UserOnboarding.findOneAndUpdate(
+            { uid, inviteCode: null },
+            { $set: { inviteCode: candidate } },
+            { returnDocument: 'after' }
+          ).select('inviteCode').lean();
+          if (updated?.inviteCode) {
+            user = updated;
+            break;
+          }
+          user = await UserOnboarding.findOne({ uid }).select('inviteCode').lean();
+          if (user?.inviteCode) break;
+        } catch (err: any) {
+          if (err?.code !== 11000) throw err;
+        }
       }
-      user.inviteCode = code;
-      await user.save();
     }
 
-    return res.status(200).json({ code: user.inviteCode });
+    return res.status(200).json({ code: user?.inviteCode });
   } catch (error) {
     console.error('Error getting invite code:', error);
     return res.status(500).json({ message: 'Server error while getting invite code' });
@@ -73,10 +84,13 @@ router.get('/invites', async (req: Request, res: Response): Promise<any> => {
 router.post('/add', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
-    const { code } = req.body;
+    const rawCode = req.body?.code;
+    if (typeof rawCode !== 'string' || !rawCode.trim()) return res.status(400).json({ message: 'code is required' });
+
+    const code = rawCode.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12);
     if (!code) return res.status(400).json({ message: 'code is required' });
 
-    const target = await UserOnboarding.findOne({ inviteCode: String(code).toUpperCase().trim() });
+    const target = await UserOnboarding.findOne({ inviteCode: code, deletionRequestedAt: null }).select('uid').lean();
     if (!target?.uid) {
       return res.status(404).json({ message: 'No user found with that code' });
     }
@@ -91,33 +105,35 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
     const existingAccepted = await FriendRequest.findOne({
       status: 'accepted',
       $or: [{ fromUid: uid, toUid: target.uid }, { fromUid: target.uid, toUid: uid }],
-    });
+    }).lean();
     if (existingAccepted) {
       return res.status(400).json({ message: 'Already friends' });
     }
 
-    const reverseRequest = await FriendRequest.findOne({ fromUid: target.uid, toUid: uid, status: 'pending' });
+    const reverseRequest = await FriendRequest.findOneAndUpdate(
+      { fromUid: target.uid, toUid: uid, status: 'pending' },
+      { $set: { status: 'accepted' } },
+      { returnDocument: 'after' }
+    );
     if (reverseRequest) {
-      reverseRequest.status = 'accepted';
-      await reverseRequest.save();
-
-      const me = await UserOnboarding.findOne({ uid });
+      const me = await UserOnboarding.findOne({ uid }).select('displayName').lean();
       sendPush(
         target.uid,
         'Friend request accepted',
         `${nameFor(me)} accepted your request. You are on each other's leaderboard now.`,
         { type: 'friend_accepted' }
       );
-
       return res.status(200).json({ message: 'Friend added', status: 'accepted' });
     }
 
-    const existingPending = await FriendRequest.findOne({ fromUid: uid, toUid: target.uid, status: 'pending' });
-    if (existingPending) {
-      return res.status(400).json({ message: 'Request already sent' });
+    try {
+      await FriendRequest.create({ fromUid: uid, toUid: target.uid, status: 'pending' });
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        return res.status(400).json({ message: 'Request already sent' });
+      }
+      throw err;
     }
-
-    await FriendRequest.create({ fromUid: uid, toUid: target.uid, status: 'pending' });
     return res.status(201).json({ message: 'Request sent', status: 'pending' });
   } catch (error) {
     console.error('Error adding friend:', error);
@@ -128,9 +144,9 @@ router.post('/add', async (req: Request, res: Response): Promise<any> => {
 router.get('/requests', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
-    const requests = await FriendRequest.find({ toUid: uid, status: 'pending' }).sort({ createdAt: -1 });
+    const requests = await FriendRequest.find({ toUid: uid, status: 'pending' }).sort({ createdAt: -1 }).lean();
     const fromUids = requests.map((r) => r.fromUid);
-    const senders = await UserOnboarding.find({ uid: { $in: fromUids } });
+    const senders = await UserOnboarding.find({ uid: { $in: fromUids } }).select('uid displayName photoURL').lean();
     const senderMap = new Map(senders.map((s) => [s.uid, s]));
 
     const result = requests.map((r) => ({
@@ -150,14 +166,19 @@ router.get('/requests', async (req: Request, res: Response): Promise<any> => {
 
 router.post('/requests/:id/accept', async (req: Request, res: Response): Promise<any> => {
   try {
-    const request = await FriendRequest.findById(req.params.id);
-    if (!request || request.toUid !== req.uid) {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid request ID' });
+    const request = await FriendRequest.findOneAndUpdate(
+      { _id: req.params.id, toUid: req.uid, status: 'pending' },
+      { $set: { status: 'accepted' } },
+      { returnDocument: 'after' }
+    );
+    if (!request) {
       return res.status(404).json({ message: 'Request not found' });
     }
-    request.status = 'accepted';
-    await request.save();
 
-    const me = await UserOnboarding.findOne({ uid: req.uid });
+    await FriendRequest.deleteMany({ fromUid: req.uid, toUid: request.fromUid });
+
+    const me = await UserOnboarding.findOne({ uid: req.uid }).select('displayName').lean();
     sendPush(
       request.fromUid,
       'Friend request accepted',
@@ -174,11 +195,11 @@ router.post('/requests/:id/accept', async (req: Request, res: Response): Promise
 
 router.post('/requests/:id/reject', async (req: Request, res: Response): Promise<any> => {
   try {
-    const request = await FriendRequest.findById(req.params.id);
-    if (!request || request.toUid !== req.uid) {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid request ID' });
+    const deleted = await FriendRequest.findOneAndDelete({ _id: req.params.id, toUid: req.uid, status: 'pending' });
+    if (!deleted) {
       return res.status(404).json({ message: 'Request not found' });
     }
-    await request.deleteOne();
     return res.status(200).json({ message: 'Friend request rejected' });
   } catch (error) {
     console.error('Error rejecting request:', error);
@@ -189,21 +210,27 @@ router.post('/requests/:id/reject', async (req: Request, res: Response): Promise
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
     const uid = req.uid;
+    if (req.query.date !== undefined && !isValidCalendarDate(req.query.date)) {
+      return res.status(400).json({ message: 'Invalid date query param' });
+    }
+
     const accepted = await FriendRequest.find({
       status: 'accepted',
       $or: [{ fromUid: uid }, { toUid: uid }],
-    });
+    }).select('fromUid toUid').lean();
 
-    const friendUids = accepted.map((r) => (r.fromUid === uid ? r.toUid : r.fromUid));
+    const friendUids = Array.from(new Set(accepted.map((r) => (r.fromUid === uid ? r.toUid : r.fromUid))));
     if (friendUids.length === 0) return res.status(200).json([]);
 
-    const today = isDateKey(req.query.date) ? (req.query.date as string) : new Date().toISOString().slice(0, 10);
+    const today = isValidCalendarDate(req.query.date) ? req.query.date : new Date().toISOString().slice(0, 10);
     const weekStart = shiftDateKey(today, -6);
 
     const [profiles, stats, screen] = await Promise.all([
-      UserOnboarding.find({ uid: { $in: friendUids } }),
-      UserStats.find({ userId: { $in: friendUids } }),
-      ScreenTime.find({ userId: { $in: friendUids }, date: { $gte: weekStart, $lte: today } }),
+      UserOnboarding.find({ uid: { $in: friendUids }, deletionRequestedAt: null })
+        .select('uid displayName photoURL targetApps proPlan proExpiresAt verifiedEmail trialEndsAt proSource equippedFrame equippedNameEffect')
+        .lean(),
+      UserStats.find({ userId: { $in: friendUids } }).lean(),
+      ScreenTime.find({ userId: { $in: friendUids }, date: { $gte: weekStart, $lte: today } }).lean(),
     ]);
     const profileMap = new Map(profiles.map((p) => [p.uid, p]));
     const statsMap = new Map(stats.map((s) => [s.userId, s]));
@@ -211,35 +238,46 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     const usageFor = (fuid: string) => {
       const tracked = profileMap.get(fuid)?.targetApps ?? [];
       const days = screen.filter((r) => r.userId === fuid);
-      const minutesOn = (date: string) =>
-        trackedMinutes(days.find((r) => r.date === date)?.apps ?? [], tracked);
-      const withData = days.map((r) => trackedMinutes(r.apps, tracked));
+      const todayRec = days.find((r) => r.date === today);
+      const hasTodayData = Boolean(todayRec) && tracked.length > 0;
+      const todayMinutes = hasTodayData ? trackedMinutes(todayRec!.apps, tracked) : null;
+      const withData = tracked.length > 0 ? days.map((r) => trackedMinutes(r.apps, tracked)) : [];
       return {
         trackedApps: tracked,
-        todayMinutes: minutesOn(today),
+        hasTodayData,
+        todayMinutes: todayMinutes ?? 0,
+        todayMinutesExact: todayMinutes,
         weekAvgMinutes: withData.length ? withData.reduce((a, b) => a + b, 0) / withData.length : 0,
       };
     };
 
     const result = friendUids
-      .map((fuid) => ({
-        ...usageFor(fuid),
-        uid: fuid,
-        displayName: nameFor(profileMap.get(fuid)),
-        photoURL: profileMap.get(fuid)?.photoURL ?? null,
-        currentStreak: statsMap.get(fuid)?.currentStreak ?? 0,
-        longestStreak: statsMap.get(fuid)?.longestStreak ?? 0,
-        totalChallenges: statsMap.get(fuid)?.totalChallenges ?? 0,
-        level: statsMap.get(fuid)?.level ?? 1,
-        successCount: statsMap.get(fuid)?.successCount ?? 0,
-        bestReactionTime: statsMap.get(fuid)?.bestReactionTime ?? 0,
-        currentXP: statsMap.get(fuid)?.currentXP ?? 0,
-        isPro: isProActive(profileMap.get(fuid) ?? null),
-        isOwner: isOwner(profileMap.get(fuid)?.verifiedEmail),
-        frame: profileMap.get(fuid)?.equippedFrame ?? null,
-        nameEffect: profileMap.get(fuid)?.equippedNameEffect ?? null,
-      }))
-      .sort((a, b) => a.todayMinutes - b.todayMinutes);
+      .filter((fuid) => profileMap.has(fuid))
+      .map((fuid) => {
+        const profile = profileMap.get(fuid)!;
+        const st = statsMap.get(fuid);
+        return {
+          ...usageFor(fuid),
+          uid: fuid,
+          displayName: nameFor(profile),
+          photoURL: profile.photoURL ?? null,
+          currentStreak: st?.currentStreak ?? 0,
+          longestStreak: st?.longestStreak ?? 0,
+          totalChallenges: st?.totalChallenges ?? 0,
+          level: st?.level ?? 1,
+          successCount: st?.successCount ?? 0,
+          bestReactionTime: st?.bestReactionTime ?? 0,
+          currentXP: st?.currentXP ?? 0,
+          isPro: isProActive(profile),
+          isOwner: isOwner(profile.verifiedEmail),
+          frame: profile.equippedFrame ?? null,
+          nameEffect: profile.equippedNameEffect ?? null,
+        };
+      })
+      .sort((a, b) => {
+        if (a.hasTodayData !== b.hasTodayData) return a.hasTodayData ? -1 : 1;
+        return a.todayMinutes - b.todayMinutes || b.currentStreak - a.currentStreak;
+      });
 
     return res.status(200).json(result);
   } catch (error) {

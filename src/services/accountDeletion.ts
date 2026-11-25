@@ -11,7 +11,7 @@ import { ShopPurchase } from '../models/ShopPurchase';
 
 export async function deleteAccount(uid: string) {
   await mongoose.connection.transaction(async (session) => {
-    await UserOnboarding.updateOne({ uid }, { $set: { deletionRequestedAt: new Date(), pushToken: null }, $inc: { progressRevision: 1 } }, { session });
+    await UserOnboarding.updateOne({ uid }, { $set: { deletionRequestedAt: new Date(), pushToken: null, usageSyncTokenHash: null }, $inc: { progressRevision: 1 } }, { session });
     const duels = await Duel.find({ status: 'active', $or: [{ fromUid: uid }, { toUid: uid }] }).session(session);
     for (const duel of duels) {
       if (duel.stake > 0) {

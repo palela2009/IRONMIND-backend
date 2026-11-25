@@ -1,4 +1,5 @@
-import { UserOnboarding, IUserOnboarding } from '../models/UserOnboarding';
+import mongoose from 'mongoose';
+import { UserOnboarding } from '../models/UserOnboarding';
 import { isProActive, isOwner } from '../routes/proRoutes';
 import { sendPush } from './notifications';
 
@@ -13,11 +14,16 @@ const SAME_DEVICE_CHECK = true;
 const PRO_MONTHLY_FREEZES = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const nameFor = (doc?: { displayName?: string; email?: string } | null) =>
-  doc?.displayName || doc?.email?.split('@')[0] || 'A friend';
+const nameFor = (doc?: { displayName?: string } | null) => doc?.displayName?.trim() || 'A friend';
+
+const sameCalendarMonth = (d: Date | null | undefined): boolean => {
+  if (!d) return false;
+  const now = new Date();
+  return d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth();
+};
 
 export async function attributeReferral(newUid: string, inviterUid: string, deviceHash: string | null): Promise<boolean> {
-  const inviter = await UserOnboarding.findOne({ uid: inviterUid });
+  const inviter = await UserOnboarding.findOne({ uid: inviterUid, deletionRequestedAt: null });
   if (!inviter) return false;
 
   if (SAME_DEVICE_CHECK && !isOwner(inviter.verifiedEmail)) {
@@ -32,12 +38,12 @@ export async function attributeReferral(newUid: string, inviterUid: string, devi
 
   const since = new Date(Date.now() - REFERRAL_WINDOW_DAYS * DAY_MS);
   const joined = await UserOnboarding.findOneAndUpdate(
-    { uid: newUid, referredBy: null, createdAt: { $gte: since } },
+    { uid: newUid, referredBy: null, deletionRequestedAt: null, createdAt: { $gte: since } },
     {
       $set: { referredBy: inviterUid, referralActivatedAt: new Date() },
       ...(deviceHash ? { $addToSet: { deviceIds: deviceHash } } : {}),
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
   if (!joined) return false;
 
@@ -48,31 +54,10 @@ export async function attributeReferral(newUid: string, inviterUid: string, devi
 export async function referralProgress(uid: string) {
   const [joined, me] = await Promise.all([
     UserOnboarding.countDocuments({ referredBy: uid }),
-    UserOnboarding.findOne({ uid }),
+    UserOnboarding.findOne({ uid }).select('referralRewards').lean(),
   ]);
   const next = REFERRAL_MILESTONES.find((m) => !(me?.referralRewards ?? []).includes(m.at)) ?? null;
   return { joined, active: joined, next, milestones: REFERRAL_MILESTONES, rewarded: me?.referralRewards ?? [] };
-}
-
-async function grantProDays(inviter: IUserOnboarding, days: number): Promise<boolean> {
-  const active = isProActive(inviter);
-  if (active && (inviter.proSource === 'owner' || inviter.proSource === 'store' || inviter.proPlan === 'lifetime')) {
-    return false;
-  }
-  const base = active && inviter.proExpiresAt ? inviter.proExpiresAt.getTime() : Date.now();
-  await UserOnboarding.updateOne(
-    { uid: inviter.uid },
-    {
-      $set: {
-        proPlan: 'monthly',
-        proExpiresAt: new Date(base + days * DAY_MS),
-        proSource: 'invites',
-        ...(active ? {} : { freezesRefilledAt: new Date() }),
-      },
-      ...(active ? {} : { $max: { streakFreezes: PRO_MONTHLY_FREEZES } }),
-    }
-  );
-  return true;
 }
 
 async function rewardInviter(inviterUid: string, friendName: string): Promise<void> {
@@ -80,18 +65,41 @@ async function rewardInviter(inviterUid: string, friendName: string): Promise<vo
 
   for (const milestone of REFERRAL_MILESTONES) {
     if (joined < milestone.at) break;
-    const claimed = await UserOnboarding.findOneAndUpdate(
-      { uid: inviterUid, referralRewards: { $ne: milestone.at } },
-      { $addToSet: { referralRewards: milestone.at } },
-      { new: true }
-    );
-    if (!claimed) continue;
+    const outcome = await mongoose.connection.transaction(async (session) => {
+      const inviter = await UserOnboarding.findOneAndUpdate(
+        { uid: inviterUid, deletionRequestedAt: null, referralRewards: { $ne: milestone.at } },
+        { $addToSet: { referralRewards: milestone.at }, $inc: { progressRevision: 1 } },
+        { returnDocument: 'after', session }
+      );
+      if (!inviter) return null;
 
-    const granted = await grantProDays(claimed, milestone.days);
+      const active = isProActive(inviter);
+      let granted = false;
+      if (!(active && (inviter.proSource === 'owner' || inviter.proSource === 'store' || inviter.proPlan === 'lifetime'))) {
+        const base = Math.max(
+          Date.now(),
+          inviter.proExpiresAt?.getTime() ?? 0,
+          inviter.trialEndsAt?.getTime() ?? 0
+        );
+        inviter.proPlan = 'monthly';
+        inviter.proExpiresAt = new Date(base + milestone.days * DAY_MS);
+        inviter.proSource = 'invites';
+        if (!sameCalendarMonth(inviter.freezesRefilledAt)) {
+          inviter.freezesRefilledAt = new Date();
+          inviter.streakFreezes = Math.max(inviter.streakFreezes, PRO_MONTHLY_FREEZES);
+        }
+        await inviter.save({ session });
+        granted = true;
+      }
+      return { granted };
+    });
+
+    if (!outcome) continue;
+
     sendPush(
       inviterUid,
-      granted ? `${milestone.days} days of Pro unlocked` : 'Invite milestone reached',
-      granted
+      outcome.granted ? `${milestone.days} days of Pro unlocked` : 'Invite milestone reached',
+      outcome.granted
         ? `${joined} friends joined IRONMIND with your code. Enjoy ${milestone.days} days of Pro.`
         : `${joined} friends joined IRONMIND with your code. Thanks for spreading the word.`,
       { type: 'referral_reward' }

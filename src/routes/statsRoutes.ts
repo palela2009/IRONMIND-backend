@@ -12,16 +12,16 @@ export async function notifyOvertakenFriends(uid: string, before: number, after:
   const links = await FriendRequest.find({
     status: 'accepted',
     $or: [{ fromUid: uid }, { toUid: uid }],
-  });
-  const friendUids = links.map((l) => (l.fromUid === uid ? l.toUid : l.fromUid));
+  }).select('fromUid toUid').lean();
+  const friendUids = Array.from(new Set(links.map((l) => (l.fromUid === uid ? l.toUid : l.fromUid))));
   if (friendUids.length === 0) return;
 
   const [me, friendStats] = await Promise.all([
-    UserOnboarding.findOne({ uid }),
-    UserStats.find({ userId: { $in: friendUids } }),
+    UserOnboarding.findOne({ uid }).select('displayName').lean(),
+    UserStats.find({ userId: { $in: friendUids } }).select('userId currentStreak').lean(),
   ]);
 
-  const myName = me?.displayName || me?.email || 'A friend';
+  const myName = me?.displayName?.trim() || 'A friend';
 
   for (const friend of friendStats) {
     const theirs = friend.currentStreak ?? 0;
@@ -44,17 +44,15 @@ router.get('/:userId', async (req: Request, res: Response): Promise<any> => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    let stats = await UserStats.findOne({ userId });
-
-    if (!stats) {
-      stats = new UserStats({ userId });
-      await stats.save();
-    }
+    const stats = await UserStats.findOneAndUpdate(
+      { userId },
+      { $setOnInsert: { userId } },
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+    );
 
     return res.status(200).json(stats);
   } catch (error) {
     console.error('Error fetching stats:', error);
-    
     return res.status(500).json({ message: 'Server error while fetching stats' });
   }
 });

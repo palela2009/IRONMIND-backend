@@ -1,8 +1,8 @@
 export const DUEL_REACTIONS: Record<string, string> = {
-  fire: '🔥 Nice streak',
-  comeon: '💪 Come on',
-  winning: "😈 I'm winning this duel",
-  gg: '👏 GG',
+  fire: '🔥 Put the phone down',
+  comeon: '📉 The feed owns you',
+  winning: '🧊 Too easy so far',
+  gg: '🤝 Respect. Rematch?',
 };
 
 export const REACTION_COOLDOWN_MS = 60 * 1000;

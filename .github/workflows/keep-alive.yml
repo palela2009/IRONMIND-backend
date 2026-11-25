@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - run: curl -fsS --retry 3 --retry-delay 20 --max-time 90 https://ironmind-backend-l3o8.onrender.com/health
+      - run: curl -fsS --retry 2 --retry-delay 10 --max-time 30 https://ironmind-backend-l3o8.onrender.com/health

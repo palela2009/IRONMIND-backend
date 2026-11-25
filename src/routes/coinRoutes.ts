@@ -1,13 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { buyShopItem, ShopError, SHOP_PRICES } from '../services/shop';
-import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE, PRO_WEEK_DAYS } from '../constants/cosmetics';
+import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE } from '../constants/cosmetics';
+import { isProActive } from './proRoutes';
 
 const router = Router();
 
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   try {
-    const doc = await UserOnboarding.findOne({ uid: req.uid });
+    const doc = await UserOnboarding.findOne({ uid: req.uid }).lean();
     return res.status(200).json({
       coins: doc?.coins ?? 0,
       unlockedThemes: doc?.unlockedThemes ?? [],
@@ -30,7 +31,19 @@ router.post('/award', (_req: Request, res: Response) => {
 router.post('/buy', async (req: Request, res: Response) => {
   try {
     const doc = await buyShopItem(req.uid, req.body);
-    res.json({ coins: doc.coins, streakFreezes: doc.streakFreezes, unlockedThemes: doc.unlockedThemes, ownedFrames: doc.ownedFrames, ownedNameEffects: doc.ownedNameEffects, equippedFrame: doc.equippedFrame, equippedNameEffect: doc.equippedNameEffect });
+    res.json({
+      coins: doc.coins,
+      streakFreezes: doc.streakFreezes,
+      unlockedThemes: doc.unlockedThemes,
+      ownedFrames: doc.ownedFrames,
+      ownedNameEffects: doc.ownedNameEffects,
+      equippedFrame: doc.equippedFrame,
+      equippedNameEffect: doc.equippedNameEffect,
+      isPro: isProActive(doc),
+      proPlan: doc.proPlan,
+      proExpiresAt: doc.proExpiresAt,
+      proSource: doc.proSource,
+    });
   } catch (error) {
     res.status(error instanceof ShopError ? error.status : 503).json({ message: error instanceof ShopError ? error.message : 'Purchase could not be confirmed. Retry the same purchase.' });
   }
@@ -38,24 +51,28 @@ router.post('/buy', async (req: Request, res: Response) => {
 
 router.post('/equip', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { slot, cosmeticId } = req.body as { slot?: 'frame' | 'nameEffect'; cosmeticId?: string | null };
+    const { slot, cosmeticId } = req.body ?? {};
     if (slot !== 'frame' && slot !== 'nameEffect') {
       return res.status(400).json({ message: 'Unknown slot' });
     }
+    if (cosmeticId !== null && cosmeticId !== undefined && typeof cosmeticId !== 'string') {
+      return res.status(400).json({ message: 'Invalid cosmeticId' });
+    }
+    const normalized = typeof cosmeticId === 'string' && cosmeticId.trim().length > 0 ? cosmeticId.trim() : null;
 
-    const doc = await UserOnboarding.findOne({ uid: req.uid });
+    const doc = await UserOnboarding.findOne({ uid: req.uid }).select('ownedFrames ownedNameEffects').lean();
     if (!doc) return res.status(404).json({ message: 'Account not found' });
 
     const owned = (slot === 'frame' ? doc.ownedFrames : doc.ownedNameEffects) ?? [];
-    if (cosmeticId && !owned.includes(cosmeticId)) {
+    if (normalized && !owned.includes(normalized)) {
       return res.status(403).json({ message: 'You do not own that' });
     }
 
     const field = slot === 'frame' ? 'equippedFrame' : 'equippedNameEffect';
     const updated = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
-      { $set: { [field]: cosmeticId ?? null } },
-      { new: true }
+      { $set: { [field]: normalized } },
+      { returnDocument: 'after' }
     );
 
     return res.status(200).json({

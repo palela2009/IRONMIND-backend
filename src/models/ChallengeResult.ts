@@ -38,5 +38,6 @@ const challengeResultSchema = new Schema<IChallengeResult>({
 });
 
 challengeResultSchema.index({ userId: 1, eventId: 1 }, { unique: true, partialFilterExpression: { eventId: { $type: 'string' } } });
+challengeResultSchema.index({ userId: 1, timestamp: -1, _id: -1 });
 
 export const ChallengeResult = model<IChallengeResult>('ChallengeResult', challengeResultSchema);

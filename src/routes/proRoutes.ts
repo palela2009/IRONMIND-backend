@@ -10,11 +10,9 @@ const router = Router();
 
 const PRO_MONTHLY_FREEZES = 20;
 const PRO_MONTHLY_COINS = 500;
-
-
 const STARTER_COINS = 150;
-
 const OWNER_COINS = 10000;
+const ALLOWED_THEMES = new Set(['default', 'cyberpunk', 'ice', 'blood', 'ember', 'matrix']);
 
 export function isTrialActive(doc: Pick<IUserOnboarding, 'trialEndsAt'> | null): boolean {
   return !!doc?.trialEndsAt && doc.trialEndsAt.getTime() > Date.now();
@@ -45,7 +43,7 @@ async function refillFreezes(uid: string) {
       $max: { streakFreezes: PRO_MONTHLY_FREEZES },
       $set: { freezesRefilledAt: new Date() },
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
 }
 
@@ -65,7 +63,7 @@ async function grantPaidProCoins(uid: string) {
       ],
     },
     { $inc: { coins: PRO_MONTHLY_COINS }, $set: { proCoinsGrantedAt: new Date() } },
-    { new: true }
+    { returnDocument: 'after' }
   );
 }
 
@@ -102,16 +100,15 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid },
         { $set: { proPlan: 'lifetime', proExpiresAt: null, proSource: 'owner' } },
-        { new: true }
+        { returnDocument: 'after' }
       );
-      console.log(`👑 [API]: Owner Pro granted to ${req.uid}`);
     }
 
     if (doc && !doc.starterCoinsGrantedAt) {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid, starterCoinsGrantedAt: null },
         { $inc: { coins: STARTER_COINS }, $set: { starterCoinsGrantedAt: new Date() } },
-        { new: true }
+        { returnDocument: 'after' }
       ) ?? doc;
     }
 
@@ -119,21 +116,19 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       doc = await UserOnboarding.findOneAndUpdate(
         { uid: req.uid, ownerCoinsGrantedAt: null },
         { $inc: { coins: OWNER_COINS }, $set: { ownerCoinsGrantedAt: new Date() } },
-        { new: true }
+        { returnDocument: 'after' }
       ) ?? doc;
-      console.log(`👑 [API]: Owner coin float granted to ${req.uid}`);
     }
 
     if (doc?.proSource === 'store' && !isProActive(doc) && revenueCatConfigured()) {
       doc = await syncStorePurchase(req.uid as string).catch(() => doc);
     }
 
-    if (doc && isProActive(doc) && doc.proSource === 'store') {
+    if (doc && isProActive(doc) && doc.proSource === 'store' && (doc.proCoinsGrantedAt === undefined || needsRefill(doc.proCoinsGrantedAt))) {
       doc = await grantPaidProCoins(req.uid as string) ?? await UserOnboarding.findOne({ uid: req.uid });
     }
     if (doc && isProActive(doc) && needsRefill(doc.freezesRefilledAt)) {
       doc = await refillFreezes(req.uid as string) ?? await UserOnboarding.findOne({ uid: req.uid });
-      console.log(`❄ [API]: Monthly freezes refilled for ${req.uid}`);
     }
 
     return res.status(200).json(entitlementPayload(doc));
@@ -145,8 +140,10 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
 
 router.post('/sync', async (req: Request, res: Response): Promise<any> => {
   try {
-    const doc = await syncStorePurchase(req.uid as string);
-    if (doc?.proSource === 'store') console.log(`⭐ [API]: Store Pro synced (${doc.proPlan}) for ${req.uid}`);
+    let doc = await syncStorePurchase(req.uid as string);
+    if (doc && isProActive(doc) && doc.proSource === 'store') {
+      doc = await grantPaidProCoins(req.uid as string) ?? doc;
+    }
     return res.status(200).json(entitlementPayload(doc));
   } catch (error) {
     console.error('Error syncing purchase:', error);
@@ -175,7 +172,7 @@ router.post('/offer/close', async (req: Request, res: Response): Promise<any> =>
     const doc = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
       { $set: { welcomeOfferClosedAt: new Date() }, $setOnInsert: { welcomeGiftEligible: true } },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
     return res.status(200).json(entitlementPayload(doc));
   } catch (error) {
@@ -186,15 +183,21 @@ router.post('/offer/close', async (req: Request, res: Response): Promise<any> =>
 
 router.post('/theme', async (req: Request, res: Response): Promise<any> => {
   try {
-    const { themeId } = req.body;
-    if (!themeId || typeof themeId !== 'string') {
-      return res.status(400).json({ message: 'themeId is required' });
+    const { themeId } = req.body ?? {};
+    if (typeof themeId !== 'string' || !ALLOWED_THEMES.has(themeId)) {
+      return res.status(400).json({ message: 'Unknown theme' });
+    }
+
+    const existing = await UserOnboarding.findOne({ uid: req.uid });
+    const unlocked = themeId === 'default' || isProActive(existing) || (existing?.unlockedThemes ?? []).includes(themeId);
+    if (!unlocked) {
+      return res.status(403).json({ message: 'Unlock this theme in the shop or with Pro first' });
     }
 
     const doc = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
       { $set: { themeId }, $setOnInsert: { welcomeGiftEligible: true } },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
 
     return res.status(200).json(entitlementPayload(doc));

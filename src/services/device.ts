@@ -11,5 +11,8 @@ export const deviceHashFor = (req: Request): string | null => {
 
 export async function rememberDevice(uid: string, hash: string | null): Promise<void> {
   if (!hash) return;
-  await UserOnboarding.updateOne({ uid }, { $addToSet: { deviceIds: hash } });
+  await UserOnboarding.updateOne(
+    { uid, deviceIds: { $ne: hash }, 'deviceIds.19': { $exists: false } },
+    { $addToSet: { deviceIds: hash } }
+  );
 }
