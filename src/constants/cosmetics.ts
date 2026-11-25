@@ -1,3 +1,16 @@
+export const UNLOCKABLE_THEMES = [
+  'cyberpunk',
+  'ice',
+  'blood',
+  'ember',
+  'matrix',
+  'gold',
+  'phantom',
+  'vapor',
+] as const;
+
+export const ALLOWED_THEMES = new Set<string>(['default', ...UNLOCKABLE_THEMES]);
+
 export const FRAME_PRICES: Record<string, number> = {
   bronze: 30,
   steel: 60,

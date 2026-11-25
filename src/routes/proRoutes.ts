@@ -4,6 +4,7 @@ import { syncStorePurchase, revenueCatConfigured } from '../services/revenuecat'
 import { deviceHashFor, rememberDevice } from '../services/device';
 import { isOwner } from '../services/identity';
 import { claimWelcomeGift, WelcomeGiftError } from '../services/welcomeGift';
+import { ALLOWED_THEMES } from '../constants/cosmetics';
 export { isOwner } from '../services/identity';
 
 const router = Router();
@@ -12,7 +13,6 @@ const PRO_MONTHLY_FREEZES = 20;
 const PRO_MONTHLY_COINS = 500;
 const STARTER_COINS = 150;
 const OWNER_COINS = 10000;
-const ALLOWED_THEMES = new Set(['default', 'cyberpunk', 'ice', 'blood', 'ember', 'matrix']);
 
 export function isTrialActive(doc: Pick<IUserOnboarding, 'trialEndsAt'> | null): boolean {
   return !!doc?.trialEndsAt && doc.trialEndsAt.getTime() > Date.now();

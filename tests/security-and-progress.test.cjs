@@ -438,11 +438,11 @@ test('photo upload blocks HTML/SVG XSS and serves valid PNG safely', async () =>
   assert.match(pubRes.headers.get('content-security-policy') || '', /sandbox/);
 });
 
-test('free users can equip default and welcome gift theme but cannot bypass paywall for other paid themes', async () => {
-  await account('a', { unlockedThemes: ['ice'] });
-  assert.equal((await request('/pro/theme', { themeId: 'ice' })).status, 200);
+test('free users can equip default and welcome gift theme including new themes but cannot bypass paywall for other paid themes', async () => {
+  await account('a', { unlockedThemes: ['gold'] });
+  assert.equal((await request('/pro/theme', { themeId: 'gold' })).status, 200);
   assert.equal((await request('/pro/theme', { themeId: 'default' })).status, 200);
-  assert.equal((await request('/pro/theme', { themeId: 'cyberpunk' })).status, 403);
+  assert.equal((await request('/pro/theme', { themeId: 'phantom' })).status, 403);
   assert.equal((await request('/pro/theme', { themeId: 'not-a-theme' })).status, 400);
 });
 
@@ -454,19 +454,20 @@ test('screen time rejects negative minutes and invalid dates', async () => {
   assert.equal((await request('/screentime', { date: today, apps: [{ app: 'YouTube', minutes: 20 }] })).status, 200);
 });
 
-test('friends leaderboard hides emails and ranks synced friends above unsynced friends', async () => {
+test('friends leaderboard hides emails, counts all apps total screen time, and ranks synced friends above unsynced friends', async () => {
   const today = new Date().toISOString().slice(0, 10);
   await account('a', { displayName: 'Me', email: 'me@example.com' });
   await account('b', { email: 'secret@example.com', targetApps: ['YouTube'] });
   await account('c', { displayName: 'Synced', email: 'c@example.com', targetApps: ['YouTube'] });
   await FriendRequest.create({ fromUid: 'a', toUid: 'b', status: 'accepted' });
   await FriendRequest.create({ fromUid: 'a', toUid: 'c', status: 'accepted' });
-  await ScreenTime.create({ userId: 'c', date: today, apps: [{ app: 'YouTube', minutes: 25 }] });
+  await ScreenTime.create({ userId: 'c', date: today, apps: [{ app: 'YouTube', minutes: 25 }, { app: 'Chrome', minutes: 15 }] });
   const res = await request(`/friends?date=${today}`, null, 'GET');
   assert.equal(res.status, 200);
   const list = await res.json();
   assert.equal(list[0].uid, 'c');
   assert.equal(list[0].hasTodayData, true);
+  assert.equal(list[0].todayMinutes, 40);
   assert.equal(list[1].uid, 'b');
   assert.equal(list[1].hasTodayData, false);
   assert.equal(list[1].displayName, 'IRONMIND User');

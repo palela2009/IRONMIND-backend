@@ -1,14 +1,15 @@
 import mongoose from 'mongoose';
 import { UserOnboarding } from '../models/UserOnboarding';
-
-const THEMES = ['cyberpunk', 'ice', 'blood', 'ember', 'matrix'];
+import { UNLOCKABLE_THEMES } from '../constants/cosmetics';
 
 export class WelcomeGiftError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
 export async function claimWelcomeGift(uid: string, themeId: unknown) {
-  if (typeof themeId !== 'string' || !THEMES.includes(themeId)) throw new WelcomeGiftError(400, 'Choose one of the welcome themes');
+  if (typeof themeId !== 'string' || !(UNLOCKABLE_THEMES as readonly string[]).includes(themeId)) {
+    throw new WelcomeGiftError(400, 'Choose one of the welcome themes');
+  }
   return mongoose.connection.transaction(async (session) => {
     const doc = await UserOnboarding.findOneAndUpdate(
       { uid, deletionRequestedAt: null }, { $inc: { progressRevision: 1 } }, { returnDocument: 'after', session }

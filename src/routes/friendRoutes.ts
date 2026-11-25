@@ -29,8 +29,8 @@ const shiftDateKey = (key: string, days: number): string => {
   return dt.toISOString().slice(0, 10);
 };
 
-const trackedMinutes = (apps: { app: string; minutes: number }[], tracked: string[]): number =>
-  apps.filter((a) => tracked.includes(a.app)).reduce((sum, a) => sum + a.minutes, 0);
+const totalMinutes = (apps: { app: string; minutes: number }[]): number =>
+  apps.reduce((sum, a) => sum + (Number.isFinite(a.minutes) && a.minutes > 0 ? a.minutes : 0), 0);
 
 function nameFor(profile?: { displayName?: string } | null): string {
   return profile?.displayName?.trim() || 'IRONMIND User';
@@ -239,9 +239,9 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       const tracked = profileMap.get(fuid)?.targetApps ?? [];
       const days = screen.filter((r) => r.userId === fuid);
       const todayRec = days.find((r) => r.date === today);
-      const hasTodayData = Boolean(todayRec) && tracked.length > 0;
-      const todayMinutes = hasTodayData ? trackedMinutes(todayRec!.apps, tracked) : null;
-      const withData = tracked.length > 0 ? days.map((r) => trackedMinutes(r.apps, tracked)) : [];
+      const hasTodayData = Boolean(todayRec);
+      const todayMinutes = hasTodayData ? totalMinutes(todayRec!.apps) : null;
+      const withData = days.map((r) => totalMinutes(r.apps));
       return {
         trackedApps: tracked,
         hasTodayData,

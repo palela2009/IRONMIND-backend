@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { ShopPurchase } from '../models/ShopPurchase';
 import { isProActive } from '../routes/proRoutes';
-import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE, PRO_WEEK_DAYS } from '../constants/cosmetics';
+import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE, PRO_WEEK_DAYS, UNLOCKABLE_THEMES } from '../constants/cosmetics';
 
 export const SHOP_PRICES = { freeze: 100, reclaim: 200, theme: 200 };
 
@@ -28,7 +28,7 @@ export async function buyShopItem(uid: string, body: any) {
       price = SHOP_PRICES.freeze;
       doc.streakFreezes += 1;
     } else if (item === 'theme') {
-      if (typeof themeId !== 'string' || !['cyberpunk', 'ice', 'blood', 'ember', 'matrix'].includes(themeId)) throw new ShopError(400, 'Invalid theme');
+      if (typeof themeId !== 'string' || !(UNLOCKABLE_THEMES as readonly string[]).includes(themeId)) throw new ShopError(400, 'Invalid theme');
       price = doc.unlockedThemes.includes(themeId) ? 0 : SHOP_PRICES.theme;
       if (price) doc.unlockedThemes.push(themeId);
     } else if (item === 'frame' || item === 'nameEffect') {
