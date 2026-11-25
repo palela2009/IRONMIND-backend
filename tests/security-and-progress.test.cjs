@@ -136,25 +136,28 @@ test('Instagram Reels wins accept the 15-second window and preserve exit time in
   assert.equal(progress.history[0].wasSuccessful, false);
 });
 
-test('Facebook, TikTok and YouTube scroll challenges sync their app and exit time', async () => {
-  await account('a', { targetApps: ['Facebook', 'TikTok', 'YouTube'], difficultyLevel: 'HARD' });
+test('Facebook, TikTok, YouTube and Snapchat scroll challenges sync their app and exit time', async () => {
+  await account('a', { targetApps: ['Facebook', 'TikTok', 'YouTube', 'Snapchat'], difficultyLevel: 'HARD' });
   const facebookWin = { ...result(1), targetApp: 'Facebook', challengeKind: 'facebook_reels', elapsedTime: 13.21 };
   const tiktokWin = { ...result(2), targetApp: 'TikTok', challengeKind: 'tiktok_feed', elapsedTime: 14.82 };
   const youtubeWin = { ...result(3), targetApp: 'YouTube', challengeKind: 'youtube_shorts', elapsedTime: 15 };
+  const snapchatWin = { ...result(4), targetApp: 'Snapchat', challengeKind: 'snapchat_spotlight', elapsedTime: 9.4 };
   await recordResult('a', facebookWin);
   await recordResult('a', tiktokWin);
   await recordResult('a', tiktokWin);
   await recordResult('a', youtubeWin);
+  await recordResult('a', snapchatWin);
   let progress = await progressFor('a');
-  assert.equal(progress.stats.currentStreak, 3);
+  assert.equal(progress.stats.currentStreak, 4);
   assert.deepEqual(progress.history.map(({ targetApp, challengeKind, elapsedTime }) => ({ targetApp, challengeKind, elapsedTime })), [
+    { targetApp: 'Snapchat', challengeKind: 'snapchat_spotlight', elapsedTime: 9.4 },
     { targetApp: 'YouTube', challengeKind: 'youtube_shorts', elapsedTime: 15 },
     { targetApp: 'TikTok', challengeKind: 'tiktok_feed', elapsedTime: 14.82 },
     { targetApp: 'Facebook', challengeKind: 'facebook_reels', elapsedTime: 13.21 },
   ]);
   await assert.rejects(() => recordResult('a', { ...tiktokWin, targetApp: 'Facebook' }), { status: 400 });
   await assert.rejects(() => recordResult('a', { ...tiktokWin, elapsedTime: 15.01 }), { status: 400 });
-  await recordResult('a', { ...result(4, false), targetApp: 'TikTok', challengeKind: 'tiktok_feed', elapsedTime: 15 });
+  await recordResult('a', { ...result(5, false), targetApp: 'TikTok', challengeKind: 'tiktok_feed', elapsedTime: 15 });
   progress = await progressFor('a');
   assert.equal(progress.stats.currentStreak, 0);
   assert.equal(progress.history[0].wasSuccessful, false);

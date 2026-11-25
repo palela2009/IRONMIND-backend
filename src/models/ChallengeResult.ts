@@ -5,6 +5,7 @@ export const SCROLL_CHALLENGE_APPS = {
   facebook_reels: 'Facebook',
   tiktok_feed: 'TikTok',
   youtube_shorts: 'YouTube',
+  snapchat_spotlight: 'Snapchat',
 } as const;
 
 export type ScrollChallengeKind = keyof typeof SCROLL_CHALLENGE_APPS;
