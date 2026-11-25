@@ -6,6 +6,7 @@ import { UserStats } from '../models/UserStats';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { isProActive } from '../routes/proRoutes';
 import { challengeDay } from './challengeTime';
+import { STREAK_TRIAL_DAYS, STREAK_TRIAL_THRESHOLD } from '../constants/cosmetics';
 
 const APPS = ['Instagram', 'YouTube', 'TikTok', 'Facebook', 'X (Twitter)', 'Reddit', 'Snapchat'];
 const SCROLL_EXIT_WINDOW_SECONDS = 15;
@@ -100,6 +101,12 @@ export async function recordResult(uid: string, body: unknown) {
       profile.coins += granted;
       profile.coinEarnDate = receivedDay;
       profile.coinEarnedToday = earnedToday + granted;
+      if (stats.currentStreak >= STREAK_TRIAL_THRESHOLD && !profile.streakTrialGrantedAt && !isProActive(profile)) {
+        const now = new Date();
+        profile.streakTrialGrantedAt = now;
+        profile.trialStartedAt = profile.trialStartedAt ?? now;
+        profile.trialEndsAt = new Date(now.getTime() + STREAK_TRIAL_DAYS * 86400000);
+      }
     }
     const [result] = await ChallengeResult.create([{ userId: uid, ...input, counted, freezeUsed, coinsGranted: granted }], { session });
     await day.save({ session });

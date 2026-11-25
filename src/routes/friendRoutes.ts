@@ -227,7 +227,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
 
     const [profiles, stats, screen] = await Promise.all([
       UserOnboarding.find({ uid: { $in: friendUids }, deletionRequestedAt: null })
-        .select('uid displayName photoURL targetApps proPlan proExpiresAt verifiedEmail trialEndsAt proSource equippedFrame equippedNameEffect')
+        .select('uid displayName photoURL targetApps proPlan proExpiresAt verifiedEmail trialEndsAt proSource equippedFrame equippedNameEffect pinnedBadge')
         .lean(),
       UserStats.find({ userId: { $in: friendUids } }).lean(),
       ScreenTime.find({ userId: { $in: friendUids }, date: { $gte: weekStart, $lte: today } }).lean(),
@@ -272,6 +272,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
           isOwner: isOwner(profile.verifiedEmail),
           frame: profile.equippedFrame ?? null,
           nameEffect: profile.equippedNameEffect ?? null,
+          pinnedBadge: profile.pinnedBadge ?? null,
         };
       })
       .sort((a, b) => {

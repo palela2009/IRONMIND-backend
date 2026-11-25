@@ -11,6 +11,18 @@ export const UNLOCKABLE_THEMES = [
 
 export const ALLOWED_THEMES = new Set<string>(['default', ...UNLOCKABLE_THEMES]);
 
+export const PRO_EXCLUSIVE_FRAMES = new Set<string>(['aurora']);
+
+export const ELITE_BADGE_IDS = new Set<string>([
+  'ascendant',
+  'machine',
+  'relentless',
+  'centurion',
+  'flawless',
+  'unbroken',
+  'quickdraw',
+]);
+
 export const FRAME_PRICES: Record<string, number> = {
   bronze: 30,
   steel: 60,
@@ -31,3 +43,6 @@ export const NAME_EFFECT_PRICES: Record<string, number> = {
 
 export const PRO_WEEK_PRICE = 500;
 export const PRO_WEEK_DAYS = 7;
+export const FREE_MAX_DUEL_STAKE = 50;
+export const STREAK_TRIAL_THRESHOLD = 7;
+export const STREAK_TRIAL_DAYS = 3;

@@ -47,6 +47,8 @@ export interface IUserOnboarding extends Document {
   ownedNameEffects: string[];
   equippedFrame: string | null;
   equippedNameEffect: string | null;
+  pinnedBadge: string | null;
+  streakTrialGrantedAt: Date | null;
   proFromCoinsAt: Date | null;
   themeId: string;
   createdAt: Date;
@@ -111,6 +113,8 @@ const userOnboardingSchema = new Schema<IUserOnboarding>({
   ownedNameEffects: { type: [String], default: [] },
   equippedFrame: { type: String, default: null },
   equippedNameEffect: { type: String, default: null },
+  pinnedBadge: { type: String, default: null },
+  streakTrialGrantedAt: { type: Date, default: null },
 
   proFromCoinsAt: { type: Date, default: null },
   themeId: { type: String, default: 'default' },

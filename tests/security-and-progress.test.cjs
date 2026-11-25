@@ -29,6 +29,7 @@ const coinRoutes = require('../dist/routes/coinRoutes').default;
 const publicRoutes = require('../dist/routes/publicRoutes').default;
 const screenTimeRoutes = require('../dist/routes/screenTimeRoutes').default;
 const friendRoutes = require('../dist/routes/friendRoutes').default;
+const duelRoutes = require('../dist/routes/duelRoutes').default;
 const syncRoutes = require('../dist/routes/syncRoutes').default;
 const { ScreenTime } = require('../dist/models/ScreenTime');
 const { FriendRequest } = require('../dist/models/FriendRequest');
@@ -49,6 +50,7 @@ before(async () => {
   app.use('/coins', verifyAuth, coinRoutes);
   app.use('/screentime', verifyAuth, screenTimeRoutes);
   app.use('/friends', verifyAuth, friendRoutes);
+  app.use('/duels', verifyAuth, duelRoutes);
   server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
@@ -509,4 +511,26 @@ test('background sync token syncs screen time and settles ended duels automatica
   assert.equal(settled.winnerUid, 'a');
   assert.equal((await UserOnboarding.findOne({ uid: 'a' })).coins, 600);
   assert.ok(await ScreenTime.findOne({ userId: 'a', date: today }));
+});
+
+test('7-win streak grants a 3-day free Pro trial once, unlocking aurora frame, badge pinning, and high-stakes duels', async () => {
+  await account('a', { coins: 300, dailyChallengeLimit: 10 });
+  await account('b', { coins: 300 });
+  await FriendRequest.create({ fromUid: 'a', toUid: 'b', status: 'accepted' });
+
+  assert.equal((await request('/coins/equip', { slot: 'frame', cosmeticId: 'aurora' })).status, 403);
+  assert.equal((await request('/coins/equip', { slot: 'badge', cosmeticId: 'quickdraw' })).status, 403);
+  assert.equal((await request('/duels', { toUid: 'b', apps: ['YouTube'], stake: 100 })).status, 403);
+
+  for (let i = 1; i <= 7; i++) {
+    await recordResult('a', { ...result(200 + i), targetApp: 'YouTube', challengeKind: 'youtube_shorts', elapsedTime: 2 });
+  }
+  const ent = await (await request('/pro', null, 'GET')).json();
+  assert.equal(ent.isPro, true);
+  assert.equal(ent.onTrial, true);
+  assert.equal(ent.streakTrialClaimed, true);
+
+  assert.equal((await request('/coins/equip', { slot: 'frame', cosmeticId: 'aurora' })).status, 200);
+  assert.equal((await request('/coins/equip', { slot: 'badge', cosmeticId: 'quickdraw' })).status, 200);
+  assert.equal((await request('/duels', { toUid: 'b', apps: ['YouTube'], stake: 100 })).status, 201);
 });

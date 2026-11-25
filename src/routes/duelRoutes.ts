@@ -5,6 +5,8 @@ import { FriendRequest } from '../models/FriendRequest';
 import { sendPush } from '../services/notifications';
 import { DUEL_REACTIONS, REACTION_COOLDOWN_MS } from '../constants/reactions';
 import { acceptDuel, cancelDuel, settleDuel, DuelError, DUEL_GRACE_MS } from '../services/duelTransactions';
+import { isProActive } from './proRoutes';
+import { FREE_MAX_DUEL_STAKE } from '../constants/cosmetics';
 import { isValidObjectId } from 'mongoose';
 
 const router = Router();
@@ -97,7 +99,12 @@ router.post('/', async (req: Request, res: Response): Promise<any> => {
     }
 
     if (ante > 0) {
-      const me = await UserOnboarding.findOne({ uid }).select('coins').lean();
+      const me = await UserOnboarding.findOne({ uid })
+        .select('coins proPlan proExpiresAt verifiedEmail trialEndsAt proSource')
+        .lean();
+      if (ante > FREE_MAX_DUEL_STAKE && !isProActive(me)) {
+        return res.status(403).json({ message: `High-stakes duels (over ${FREE_MAX_DUEL_STAKE} coins) require IronMind Pro` });
+      }
       if ((me?.coins ?? 0) < ante) {
         return res.status(409).json({ message: `You need ${ante} coins to start this duel` });
       }

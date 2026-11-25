@@ -82,6 +82,8 @@ function entitlementPayload(doc: IUserOnboarding | null) {
     ownedNameEffects: doc?.ownedNameEffects ?? [],
     equippedFrame: doc?.equippedFrame ?? null,
     equippedNameEffect: doc?.equippedNameEffect ?? null,
+    pinnedBadge: doc?.pinnedBadge ?? null,
+    streakTrialClaimed: Boolean(doc?.streakTrialGrantedAt),
     themeId: doc?.themeId ?? 'default',
     welcomeOffer: !doc?.welcomeOfferClosedAt && !isProActive(doc),
     welcomeGiftAvailable: !!doc?.welcomeGiftEligible && !doc.welcomeGiftClaimedAt,

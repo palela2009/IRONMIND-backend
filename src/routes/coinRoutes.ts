@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { UserOnboarding } from '../models/UserOnboarding';
 import { buyShopItem, ShopError, SHOP_PRICES } from '../services/shop';
-import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE } from '../constants/cosmetics';
+import { FRAME_PRICES, NAME_EFFECT_PRICES, PRO_WEEK_PRICE, PRO_EXCLUSIVE_FRAMES, ELITE_BADGE_IDS } from '../constants/cosmetics';
 import { isProActive } from './proRoutes';
 
 const router = Router();
@@ -52,7 +52,7 @@ router.post('/buy', async (req: Request, res: Response) => {
 router.post('/equip', async (req: Request, res: Response): Promise<any> => {
   try {
     const { slot, cosmeticId } = req.body ?? {};
-    if (slot !== 'frame' && slot !== 'nameEffect') {
+    if (slot !== 'frame' && slot !== 'nameEffect' && slot !== 'badge') {
       return res.status(400).json({ message: 'Unknown slot' });
     }
     if (cosmeticId !== null && cosmeticId !== undefined && typeof cosmeticId !== 'string') {
@@ -60,15 +60,33 @@ router.post('/equip', async (req: Request, res: Response): Promise<any> => {
     }
     const normalized = typeof cosmeticId === 'string' && cosmeticId.trim().length > 0 ? cosmeticId.trim() : null;
 
-    const doc = await UserOnboarding.findOne({ uid: req.uid }).select('ownedFrames ownedNameEffects').lean();
+    const doc = await UserOnboarding.findOne({ uid: req.uid })
+      .select('ownedFrames ownedNameEffects proPlan proExpiresAt verifiedEmail trialEndsAt proSource')
+      .lean();
     if (!doc) return res.status(404).json({ message: 'Account not found' });
 
-    const owned = (slot === 'frame' ? doc.ownedFrames : doc.ownedNameEffects) ?? [];
-    if (normalized && !owned.includes(normalized)) {
-      return res.status(403).json({ message: 'You do not own that' });
+    const pro = isProActive(doc);
+    if (slot === 'badge') {
+      if (normalized && (!pro || !ELITE_BADGE_IDS.has(normalized))) {
+        return res.status(403).json({ message: 'Elite badges require IronMind Pro' });
+      }
+    } else if (slot === 'frame') {
+      const owned = doc.ownedFrames ?? [];
+      if (normalized) {
+        if (PRO_EXCLUSIVE_FRAMES.has(normalized)) {
+          if (!pro) return res.status(403).json({ message: 'This exclusive frame requires IronMind Pro' });
+        } else if (!owned.includes(normalized)) {
+          return res.status(403).json({ message: 'You do not own that' });
+        }
+      }
+    } else {
+      const owned = doc.ownedNameEffects ?? [];
+      if (normalized && !owned.includes(normalized)) {
+        return res.status(403).json({ message: 'You do not own that' });
+      }
     }
 
-    const field = slot === 'frame' ? 'equippedFrame' : 'equippedNameEffect';
+    const field = slot === 'frame' ? 'equippedFrame' : slot === 'nameEffect' ? 'equippedNameEffect' : 'pinnedBadge';
     const updated = await UserOnboarding.findOneAndUpdate(
       { uid: req.uid },
       { $set: { [field]: normalized } },
@@ -78,6 +96,7 @@ router.post('/equip', async (req: Request, res: Response): Promise<any> => {
     return res.status(200).json({
       equippedFrame: updated?.equippedFrame ?? null,
       equippedNameEffect: updated?.equippedNameEffect ?? null,
+      pinnedBadge: updated?.pinnedBadge ?? null,
     });
   } catch (error) {
     console.error('Error equipping cosmetic:', error);
